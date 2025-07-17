@@ -1,0 +1,34 @@
+{
+  "name": "nester-supabase-scripts",
+  "version": "1.0.0",
+  "description": "Supabase database setup and management scripts for Nester",
+  "main": "index.js",
+  "scripts": {
+    "setup": "node quick-setup.js",
+    "verify": "node verify-100-percent.js",
+    "migrate": "node setup-database.js",
+    "test-auth": "node test-supabase-auth.js",
+    "complete-setup": "node complete-setup.js",
+    "apply-migrations": "node apply-migrations.js"
+  },
+  "keywords": [
+    "supabase",
+    "database",
+    "migration",
+    "authentication",
+    "nester"
+  ],
+  "author": "Nester Team",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
