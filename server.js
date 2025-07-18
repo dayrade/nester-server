@@ -1,12 +1,23 @@
+// Load environment variables first
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const authRoutes = require('./routes/auth');
+// Gradually adding back routes
+const profileRoutes = require('./routes/profile');
+const propertyRoutes = require('./routes/properties');
+// const brandRoutes = require('./routes/brands');
+// const socialRoutes = require('./routes/social');
+// const chatRoutes = require('./routes/chat');
+// const analyticsRoutes = require('./routes/analytics');
+// const uploadRoutes = require('./routes/upload');
+// const webhookRoutes = require('./routes/webhooks');
 const connectionPool = require('./config/connectionPool');
 const sessionManager = require('./middlewares/sessionManager');
 const performanceMonitor = require('./middlewares/performanceMonitor');
@@ -211,14 +222,57 @@ app.get('/status', (req, res) => {
 app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter);
 
+// API documentation endpoint
+app.get('/api', (req, res) => {
+  res.json({
+    name: 'Nester API',
+    version: '1.0.0',
+    description: 'AI-powered real estate marketing platform',
+    endpoints: {
+      auth: '/api/auth',
+      properties: '/api/properties',
+      profile: '/api/profile',
+      brands: '/api/brands',
+      social: '/api/social',
+      chat: '/api/chat',
+      analytics: '/api/analytics',
+      upload: '/api/upload',
+      webhooks: '/api/webhooks'
+    },
+    health: '/health'
+  });
+});
+
+// Test profile endpoint without auth (before other routes)
+app.get('/api/profile/test', (req, res) => {
+  res.json({ 
+    message: 'Profile endpoint is working!', 
+    timestamp: new Date().toISOString(),
+    mockProfile: {
+      id: 'test-user-123',
+      name: 'Test User',
+      email: 'test@example.com'
+    }
+  });
+});
+
+// API routes
+app.use('/api/auth', authRoutes);
+// Gradually adding back routes
+app.use('/api/profile', profileRoutes);
+app.use('/api/properties', propertyRoutes);
+// app.use('/api/brands', brandRoutes);
+// app.use('/api/social', socialRoutes);
+// app.use('/api/chat', chatRoutes);
+// app.use('/api/analytics', analyticsRoutes);
+// app.use('/api/upload', uploadRoutes);
+// app.use('/api/webhooks', webhookRoutes);
+
 // Serve static files with caching
 app.use(express.static(path.join(__dirname, '..', 'public'), {
   maxAge: '1d', // Cache static files for 1 day
   etag: true
 }));
-
-// Routes
-app.use('/api/auth', authRoutes);
 
 // Basic route for testing
 app.get('/', (req, res) => {
@@ -228,6 +282,11 @@ app.get('/', (req, res) => {
     environment: process.env.NODE_ENV,
     timestamp: new Date().toISOString()
   });
+});
+
+// Basic test route
+app.get('/test', (req, res) => {
+  res.json({ message: 'Server is working!', timestamp: new Date().toISOString() });
 });
 
 // 404 handler
@@ -271,11 +330,23 @@ const gracefulShutdown = async (signal) => {
       console.log('HTTP server closed');
       
       // Cleanup resources
-      await Promise.all([
-        connectionPool.shutdown(),
-        sessionManager.shutdown(),
-        performanceMonitor.shutdown()
-      ]);
+      const cleanupPromises = [];
+      
+      if (connectionPool && typeof connectionPool.closeAllConnections === 'function') {
+        cleanupPromises.push(connectionPool.closeAllConnections());
+      }
+      
+      if (sessionManager && typeof sessionManager.shutdown === 'function') {
+        cleanupPromises.push(sessionManager.shutdown());
+      }
+      
+      if (performanceMonitor && typeof performanceMonitor.shutdown === 'function') {
+        cleanupPromises.push(performanceMonitor.shutdown());
+      }
+      
+      if (cleanupPromises.length > 0) {
+        await Promise.all(cleanupPromises);
+      }
       
       console.log('All resources cleaned up');
       process.exit(0);
