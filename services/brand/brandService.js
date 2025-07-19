@@ -1,16 +1,16 @@
-const { createClient } = require('@supabase/supabase-js');
 const config = require('../../config/config');
 const logger = require('../../utils/logger');
 const { StorageService } = require('../storage/storageService');
-const { ValidationService } = require('../validation/validationService');
+const validationService = require('../validation/validationService');
+const { supabaseAdmin } = require('../../config/supabaseClient');
 
-const supabase = createClient(config.supabase.url, config.supabase.serviceKey);
+const supabase = supabaseAdmin;
 
 class BrandService {
   constructor() {
     this.supabase = supabase;
     this.storageService = new StorageService();
-    this.validationService = new ValidationService();
+    this.validationService = validationService;
     
     // Default Nester branding
     this.defaultBranding = {

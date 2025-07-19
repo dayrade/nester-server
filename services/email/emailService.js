@@ -1,15 +1,13 @@
-const { createClient } = require('@supabase/supabase-js');
 const config = require('../../config/config');
+const { supabaseAdmin } = require('../../config/supabaseClient');
 const aiService = require('../ai/aiService');
 const brandService = require('../brand/brandService');
 const axios = require('axios');
 const puppeteer = require('puppeteer');
 
-const supabase = createClient(config.supabase.url, config.supabase.serviceKey);
-
 class EmailService {
   constructor() {
-    this.brevoApiUrl = 'https://api.brevo.com/v3';
+    this.brevoApiUrl = process.env.BREVO_API_URL || 'https://api.brevo.com/v3';
     this.brevoApiKey = process.env.BREVO_API_KEY;
     
     // Email template types
@@ -757,7 +755,7 @@ Return as JSON: {
 
   async saveTemplateRecord(agentId, templateType, template, brevoTemplateId) {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('email_templates')
         .insert([{
           agent_id: agentId,
@@ -788,7 +786,7 @@ Return as JSON: {
 
   async getAgentTemplate(agentId, templateType) {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('email_templates')
         .select('*')
         .eq('agent_id', agentId)
@@ -812,7 +810,7 @@ Return as JSON: {
 
   async logEmailSent(emailData) {
     try {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('email_logs')
         .insert([{
           ...emailData,
@@ -848,7 +846,7 @@ Return as JSON: {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - parseInt(timeRange.replace('d', '')));
 
-      const { data: emailLogs, error } = await supabase
+      const { data: emailLogs, error } = await supabaseAdmin
         .from('email_logs')
         .select('*')
         .eq('agent_id', agentId)

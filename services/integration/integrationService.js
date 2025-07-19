@@ -1,8 +1,6 @@
 const axios = require('axios');
 const config = require('../../config/config');
-const { createClient } = require('@supabase/supabase-js');
-
-const supabase = createClient(config.supabase.url, config.supabase.serviceKey);
+const { supabaseAdmin } = require('../../config/supabaseClient');
 
 class IntegrationService {
   constructor() {
@@ -26,8 +24,8 @@ class IntegrationService {
 
     // Cache duration (in minutes)
     this.cacheDuration = {
-      places: 60 * 24, // 24 hours
-      walkScore: 60 * 24 * 7, // 7 days
+      places: parseInt(process.env.CACHE_DURATION_HOURS || '24') * 60, // configurable hours
+      walkScore: parseInt(process.env.WALKSCORE_CACHE_DURATION_DAYS || '7') * 60 * 24, // configurable days
       schools: 60 * 24 * 7, // 7 days
       mortgageRates: 60, // 1 hour
       marketData: 60 * 6 // 6 hours
@@ -135,7 +133,7 @@ class IntegrationService {
 
       for (const type of amenityTypes) {
         try {
-          const response = await axios.get(`${this.apis.googlePlaces}/nearbysearch/json`, {
+          const response = await axios.get(`${process.env.GOOGLE_PLACES_API_URL || this.apis.googlePlaces}/nearbysearch/json`, {
             params: {
               location: `${location.lat},${location.lng}`,
               radius: radius,
@@ -155,7 +153,7 @@ class IntegrationService {
           }));
 
           // Small delay to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 100));
+          await new Promise(resolve => setTimeout(resolve, parseInt(process.env.INTEGRATION_REQUEST_DELAY_MS || '100')));
 
         } catch (error) {
           console.error(`Error fetching ${type} amenities:`, error.message);
@@ -186,7 +184,7 @@ class IntegrationService {
         return cached;
       }
 
-      const response = await axios.get(this.apis.walkScore, {
+      const response = await axios.get(process.env.WALKSCORE_API_URL || this.apis.walkScore, {
         params: {
           format: 'json',
           address: address,
@@ -479,7 +477,7 @@ class IntegrationService {
       const expiresAt = new Date();
       expiresAt.setMinutes(expiresAt.getMinutes() + durationMinutes);
 
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('api_cache')
         .upsert({
           cache_type: type,
@@ -501,7 +499,7 @@ class IntegrationService {
 
   async getCachedData(type, key) {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('api_cache')
         .select('data, expires_at')
         .eq('cache_type', type)
@@ -524,7 +522,7 @@ class IntegrationService {
 
   async clearExpiredCache() {
     try {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('api_cache')
         .delete()
         .lt('expires_at', new Date().toISOString());
@@ -545,7 +543,7 @@ class IntegrationService {
    */
   async savePropertyPlaceData(propertyId, placeData) {
     try {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('properties')
         .update({
           place_data: placeData,
@@ -564,7 +562,7 @@ class IntegrationService {
 
   async saveEnrichedPropertyData(propertyId, enrichedData) {
     try {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('property_enrichment')
         .upsert({
           property_id: propertyId,
@@ -674,7 +672,7 @@ class IntegrationService {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - parseInt(timeRange.replace('d', '')));
 
-      const { data: cacheData, error } = await supabase
+      const { data: cacheData, error } = await supabaseAdmin
         .from('api_cache')
         .select('cache_type, created_at')
         .gte('created_at', startDate.toISOString());

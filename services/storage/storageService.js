@@ -1,17 +1,17 @@
-const { createClient } = require('@supabase/supabase-js');
 const sharp = require('sharp');
 const crypto = require('crypto');
 const path = require('path');
 const config = require('../../config/config');
 const logger = require('../../utils/logger');
-const { ValidationService } = require('../validation/validationService');
+const validationService = require('../validation/validationService');
+const { supabaseAdmin } = require('../../config/supabaseClient');
 
-const supabase = createClient(config.supabase.url, config.supabase.serviceKey);
+const supabase = supabaseAdmin;
 
 class StorageService {
   constructor() {
     this.supabase = supabase;
-    this.validationService = new ValidationService();
+    this.validationService = validationService;
     
     // Structured bucket organization
     this.buckets = {
@@ -169,17 +169,10 @@ class StorageService {
       // Store image record in database
       const imageRecord = {
         property_id: propertyId,
-        agent_id: agentId,
-        original_filename: imageFile.originalname,
         storage_path: imageVariants.original,
-        thumbnail_path: imageVariants.thumbnail,
-        medium_path: imageVariants.medium,
-        large_path: imageVariants.large,
-        file_size: imageFile.size,
-        mime_type: imageFile.mimetype,
-        is_primary: options.isPrimary || false,
         alt_text: options.altText || '',
-        display_order: options.displayOrder || 0
+        display_order: options.displayOrder || 0,
+        is_primary: options.isPrimary || false
       };
 
       const { data, error } = await supabase
@@ -939,6 +932,53 @@ class StorageService {
     }
   }
   
+  /**
+   * Get property images from database
+   * @param {string} propertyId - Property ID
+   * @param {string} agentId - Agent ID
+   * @returns {Array} Property images
+   */
+  async getPropertyImages(propertyId, agentId) {
+    try {
+      logger.info('Getting property images', { propertyId, agentId });
+      
+      const { data, error } = await supabase
+        .from('property_images')
+        .select('*')
+        .eq('property_id', propertyId)
+        .order('display_order', { ascending: true });
+      
+      if (error) {
+        throw new Error(`Failed to fetch property images: ${error.message}`);
+      }
+      
+      // Add public URLs to images
+      const imagesWithUrls = data.map(image => ({
+        ...image,
+        original_url: image.storage_path ? this.getPublicUrl(this.buckets.PROPERTY_IMAGES, image.storage_path) : null,
+        thumbnail_url: image.thumbnail_path ? this.getPublicUrl(this.buckets.PROPERTY_IMAGES, image.thumbnail_path) : null,
+        medium_url: image.medium_path ? this.getPublicUrl(this.buckets.PROPERTY_IMAGES, image.medium_path) : null,
+        large_url: image.large_path ? this.getPublicUrl(this.buckets.PROPERTY_IMAGES, image.large_path) : null
+      }));
+      
+      logger.info('Property images retrieved successfully', {
+        propertyId,
+        agentId,
+        imageCount: imagesWithUrls.length
+      });
+      
+      return imagesWithUrls;
+      
+    } catch (error) {
+      logger.error('Error getting property images', {
+        propertyId,
+        agentId,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
   /**
    * Health check for storage service
    * @returns {Object} Health status

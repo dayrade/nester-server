@@ -47,10 +47,11 @@ app.use(helmet({
 const corsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'https://nester.studio',
-      process.env.NEXT_PUBLIC_SITE_URL
+      process.env.FRONTEND_URL || 'http://localhost:3000',
+      process.env.BACKEND_URL || 'http://localhost:3002',
+      process.env.PRODUCTION_URL || 'https://nester.studio',
+      process.env.NEXT_PUBLIC_SITE_URL,
+      process.env.NEXT_PUBLIC_APP_URL
     ].filter(Boolean);
     
     // Allow requests with no origin (mobile apps, etc.)
@@ -70,8 +71,8 @@ app.use(cors(corsOptions));
 
 // Rate limiting for API endpoints
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Limit each IP to 1000 requests per windowMs
+  windowMs: parseInt(process.env.API_RATE_WINDOW_MS || '900000'), // 15 minutes default
+  max: parseInt(process.env.API_RATE_MAX_REQUESTS || '1000'), // Limit each IP to 1000 requests per windowMs
   message: {
     error: 'Too many requests from this IP, please try again later.',
     retryAfter: '15 minutes'
@@ -87,8 +88,8 @@ const apiLimiter = rateLimit({
 
 // Stricter rate limiting for auth endpoints
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 50, // Limit each IP to 50 auth requests per windowMs
+  windowMs: parseInt(process.env.AUTH_RATE_WINDOW_MS || '900000'), // 15 minutes default
+  max: parseInt(process.env.AUTH_RATE_MAX_REQUESTS || '50'), // Limit each IP to 50 auth requests per windowMs
   message: {
     error: 'Too many authentication attempts, please try again later.',
     retryAfter: '15 minutes'
@@ -99,7 +100,7 @@ const authLimiter = rateLimit({
 
 // Body parsing middleware with size limits
 app.use(express.json({ 
-  limit: '10mb',
+  limit: process.env.JSON_BODY_LIMIT || '10mb',
   verify: (req, res, buf) => {
     // Store raw body for webhook verification if needed
     req.rawBody = buf;
@@ -107,7 +108,7 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ 
   extended: true, 
-  limit: '10mb' 
+  limit: process.env.URLENCODED_BODY_LIMIT || '10mb' 
 }));
 app.use(cookieParser());
 

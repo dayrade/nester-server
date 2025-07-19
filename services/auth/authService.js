@@ -48,7 +48,7 @@ async function getUser(token) {
 async function resetPassword(email) {
   try {
     const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${process.env.FRONTEND_URL || 'http://localhost:3002'}/auth/reset-password`,
+      redirectTo: `${process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/reset-password`,
     });
     return { data, error };
   } catch (err) {

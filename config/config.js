@@ -27,7 +27,7 @@ class Config {
     loadConfig() {
         // Server configuration
         this.server = {
-            port: parseInt(process.env.PORT) || 3000,
+            port: parseInt(process.env.EXPRESS_PORT) || parseInt(process.env.PORT) || 3001, // Use environment variable or default to 3001
             host: process.env.HOST || 'localhost',
             corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
             trustProxy: process.env.TRUST_PROXY === 'true'

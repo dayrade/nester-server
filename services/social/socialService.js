@@ -1,12 +1,10 @@
-const { createClient } = require('@supabase/supabase-js');
+const { supabaseAdmin } = require('../../config/supabaseClient');
 const config = require('../../config/config');
 const aiService = require('../ai/aiService');
 const storageService = require('../storage/storageService');
 const brandService = require('../brand/brandService');
 const puppeteer = require('puppeteer');
 const axios = require('axios');
-
-const supabase = createClient(config.supabase.url, config.supabase.serviceKey);
 
 class SocialService {
   constructor() {
@@ -373,7 +371,7 @@ Return as JSON: {"text": "post content", "hashtags": ["hashtag1", "hashtag2"], "
       const imagePaths = [];
 
       // Get property images
-      const { data: propertyImages } = await supabase
+      const { data: propertyImages } = await supabaseAdmin
         .from('property_images')
         .select('*')
         .eq('property_id', propertyData.id)
@@ -553,7 +551,7 @@ Return as JSON: {"text": "post content", "hashtags": ["hashtag1", "hashtag2"], "
   async publishToMixPost(campaignId, agentId) {
     try {
       // Get campaign posts
-      const { data: posts, error } = await supabase
+      const { data: posts, error } = await supabaseAdmin
         .from('social_posts')
         .select('*')
         .eq('campaign_id', campaignId)
@@ -578,7 +576,7 @@ Return as JSON: {"text": "post content", "hashtags": ["hashtag1", "hashtag2"], "
             const mixpostPost = await this.createMixPostScheduledPost(post, mixpostConfig);
             
             // Update post with MixPost ID
-            await supabase
+            await supabaseAdmin
               .from('social_posts')
               .update({
                 mixpost_id: mixpostPost.id,
@@ -594,7 +592,7 @@ Return as JSON: {"text": "post content", "hashtags": ["hashtag1", "hashtag2"], "
             console.error(`Failed to publish post ${post.id}:`, error);
             
             // Mark post as failed
-            await supabase
+            await supabaseAdmin
               .from('social_posts')
               .update({ status: 'failed', error_message: error.message })
               .eq('id', post.id);
@@ -607,7 +605,7 @@ Return as JSON: {"text": "post content", "hashtags": ["hashtag1", "hashtag2"], "
         
         // Rate limiting delay
         if (i + batchSize < posts.length) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, parseInt(process.env.SOCIAL_POST_DELAY_MS || '2000')));
         }
       }
 
@@ -656,7 +654,7 @@ Return as JSON: {"text": "post content", "hashtags": ["hashtag1", "hashtag2"], "
    * Helper methods
    */
   async getPropertyData(propertyId) {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('properties')
       .select('*')
       .eq('id', propertyId)
@@ -672,7 +670,7 @@ Return as JSON: {"text": "post content", "hashtags": ["hashtag1", "hashtag2"], "
   async saveCampaign(propertyId, agentId, campaignData) {
     try {
       // Save campaign record
-      const { data: campaign, error: campaignError } = await supabase
+      const { data: campaign, error: campaignError } = await supabaseAdmin
         .from('social_campaigns')
         .insert([{
           property_id: propertyId,
@@ -695,7 +693,7 @@ Return as JSON: {"text": "post content", "hashtags": ["hashtag1", "hashtag2"], "
         campaign_id: campaign.id
       }));
 
-      const { error: postsError } = await supabase
+      const { error: postsError } = await supabaseAdmin
         .from('social_posts')
         .insert(postsWithCampaignId);
 

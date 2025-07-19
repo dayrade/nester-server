@@ -1,7 +1,7 @@
-const { createClient } = require('@supabase/supabase-js');
 const config = require('../../config/config');
+const { supabaseAdmin } = require('../../config/supabaseClient');
 
-const supabase = createClient(config.supabase.url, config.supabase.serviceKey);
+const supabase = supabaseAdmin;
 
 class AnalyticsService {
   constructor() {

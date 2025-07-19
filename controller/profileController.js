@@ -56,7 +56,7 @@ const updateProfile = async (req, res) => {
 const uploadAvatar = async (req, res) => {
   try {
     // Mock avatar upload response
-    const avatarUrl = 'https://example.com/avatar.jpg';
+    const avatarUrl = process.env.DEFAULT_AVATAR_URL || 'https://example.com/avatar.jpg';
 
     res.json({
       success: true,

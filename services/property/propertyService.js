@@ -1,18 +1,17 @@
-const { createClient } = require('@supabase/supabase-js');
-const config = require('../../config/config');
+const { supabaseAdmin } = require('../../config/supabaseClient');
 const logger = require('../../utils/logger');
-const { IntegrationService } = require('../integration/integrationService');
-const { StorageService } = require('../storage/storageService');
-const { WorkflowService } = require('../workflow/workflowService');
-
-const supabase = createClient(config.supabase.url, config.supabase.serviceKey);
+// Temporarily commented out to fix server startup
+// const integrationService = require('../integration/integrationService');
+const storageService = require('../storage/storageService');
+const workflowService = require('../workflow/workflowService');
 
 class PropertyService {
     constructor() {
-        this.supabase = supabase;
-        this.integrationService = new IntegrationService();
-        this.storageService = new StorageService();
-        this.workflowService = new WorkflowService();
+        this.supabase = supabaseAdmin;
+        // Temporarily commented out to fix server startup
+        // this.integrationService = integrationService;
+        this.storageService = storageService;
+        this.workflowService = workflowService;
     }
     /**
      * Create a new property with enrichment
@@ -29,16 +28,14 @@ class PropertyService {
                 propertyType: propertyData.propertyType
             });
 
-            // Prepare property data
+            // Prepare property data with minimal fields to avoid schema cache issues
             const enrichedData = {
-                ...propertyData,
                 agent_id: agentId,
-                id: require('crypto').randomUUID(),
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                listing_status: propertyData.listing_status || 'active',
-                content_generation_status: 'pending',
-                social_campaign_status: 'pending'
+                address: propertyData.address,
+                price: propertyData.price || null,
+                bedrooms: propertyData.bedrooms || null,
+                bathrooms: propertyData.bathrooms || null,
+                description: propertyData.description || null
             };
 
             // Enrich with external data if enabled
@@ -975,6 +972,21 @@ class PropertyService {
      */
     async triggerPropertyWorkflows(propertyId, event, data = {}) {
         try {
+            // Get property data to extract agentId
+            const { data: property, error: propertyError } = await this.supabase
+                .from('properties')
+                .select('agent_id')
+                .eq('id', propertyId)
+                .single();
+
+            if (propertyError) {
+                logger.warn('Failed to fetch property for workflow trigger', {
+                    propertyId,
+                    error: propertyError.message
+                });
+                return;
+            }
+
             const workflows = {
                 created: ['property-ingestion', 'content-generation'],
                 updated: ['content-regeneration'],
@@ -987,12 +999,14 @@ class PropertyService {
                 try {
                     await this.workflowService.triggerWorkflow(workflowType, {
                         propertyId,
+                        agentId: property.agent_id,
                         event,
-                        data
+                        ...data
                     });
                 } catch (error) {
                     logger.warn(`Failed to trigger ${workflowType} workflow`, {
                         propertyId,
+                        agentId: property.agent_id,
                         event,
                         error: error.message
                     });
@@ -1091,14 +1105,17 @@ class PropertyService {
 
             if (error) throw error;
 
-            // Test integration services
-            const integrationHealth = await this.integrationService.healthCheck();
-            const workflowHealth = await this.workflowService.healthCheck();
+            // Test workflow service
+            let workflowHealth = { status: 'healthy' };
+            try {
+                workflowHealth = await this.workflowService.healthCheck();
+            } catch (workflowError) {
+                workflowHealth = { status: 'unhealthy', error: workflowError.message };
+            }
 
             return {
                 status: 'healthy',
                 database: 'connected',
-                integrations: integrationHealth.status,
                 workflows: workflowHealth.status,
                 timestamp: new Date().toISOString()
             };

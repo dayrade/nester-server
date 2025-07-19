@@ -1,12 +1,10 @@
-const { createClient } = require('@supabase/supabase-js');
+const { supabaseAdmin } = require('../../config/supabaseClient');
 const config = require('../../config/config');
 const aiService = require('../ai/aiService');
 const emailService = require('../email/emailService');
 const analyticsService = require('../analytics/analyticsService');
 const brandService = require('../brand/brandService');
 const { v4: uuidv4 } = require('uuid');
-
-const supabase = createClient(config.supabase.url, config.supabase.serviceKey);
 
 class ChatService {
   constructor() {
@@ -36,8 +34,8 @@ class ChatService {
       SIMILAR_PROPERTIES: 'similar_properties'
     };
 
-    // Session timeout (30 minutes)
-    this.sessionTimeout = 30 * 60 * 1000;
+    // Session timeout (configurable, default 30 minutes)
+    this.sessionTimeout = parseInt(process.env.CHAT_SESSION_TIMEOUT_MS || '1800000');
   }
 
   /**
@@ -61,7 +59,7 @@ class ChatService {
 
       // Create session
       const sessionId = uuidv4();
-      const { data: session, error } = await supabase
+      const { data: session, error } = await supabaseAdmin
         .from('chat_sessions')
         .insert([{
           id: sessionId,
@@ -198,7 +196,7 @@ class ChatService {
       console.log(`Handling lead capture for session ${sessionId}, trigger: ${triggerType}`);
 
       // Update session state
-      await supabase
+      await supabaseAdmin
         .from('chat_sessions')
         .update({ 
           session_state: this.sessionStates.LEAD_CAPTURE,
@@ -251,7 +249,7 @@ class ChatService {
       const validatedLead = this.validateLeadData(leadData);
 
       // Save lead information
-      const { data: lead, error: leadError } = await supabase
+      const { data: lead, error: leadError } = await supabaseAdmin
         .from('leads')
         .insert([{
           session_id: sessionId,
@@ -339,14 +337,14 @@ class ChatService {
   async buildKnowledgeBase(property, agentId) {
     try {
       // Get property images
-      const { data: images } = await supabase
+      const { data: images } = await supabaseAdmin
         .from('property_images')
         .select('*')
         .eq('property_id', property.id)
         .order('display_order');
 
       // Get agent information
-      const { data: agent } = await supabase
+      const { data: agent } = await supabaseAdmin
         .from('users')
         .select('full_name, email, phone, bio')
         .eq('id', agentId)
@@ -623,7 +621,7 @@ REMEMBER: Your goal is to provide helpful information while identifying serious 
    */
   async getSession(sessionId) {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdminAdmin
         .from('chat_sessions')
         .select('*')
         .eq('id', sessionId)
@@ -653,7 +651,7 @@ REMEMBER: Your goal is to provide helpful information while identifying serious 
       messages.push(message);
 
       // Update session with new message
-      const { error } = await supabase
+      const { error } = await supabaseAdminAdmin
         .from('chat_sessions')
         .update({ 
           messages: messages,
@@ -832,7 +830,7 @@ Feel free to ask me anything about the property, neighborhood, or if you'd like 
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - parseInt(timeRange.replace('d', '')));
 
-      const { data: sessions, error } = await supabase
+      const { data: sessions, error } = await supabaseAdmin
         .from('chat_sessions')
         .select('*')
         .eq('agent_id', agentId)

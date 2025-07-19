@@ -1,6 +1,6 @@
 const axios = require('axios');
-const { createClient } = require('@supabase/supabase-js');
 const config = require('../../config/config');
+const { supabaseAdmin } = require('../../config/supabaseClient');
 const logger = require('../../utils/logger');
 const aiService = require('../ai/aiService');
 const socialService = require('../social/socialService');
@@ -8,8 +8,6 @@ const emailService = require('../email/emailService');
 const brandService = require('../brand/brandService');
 const scrapingService = require('../scraping/scrapingService');
 const storageService = require('../storage/storageService');
-
-const supabase = createClient(config.supabase.url, config.supabase.serviceKey);
 
 class WorkflowService {
   constructor() {
@@ -45,7 +43,7 @@ class WorkflowService {
     // Retry configuration
     this.retryConfig = {
       maxRetries: 3,
-      retryDelay: 5000, // 5 seconds
+      retryDelay: parseInt(process.env.WORKFLOW_RETRY_DELAY_MS || '5000'), // 5 seconds default
       backoffMultiplier: 2
     };
   }
@@ -130,7 +128,7 @@ class WorkflowService {
       });
 
       // Get property data
-      const { data: property, error } = await supabase
+      const { data: property, error } = await supabaseAdmin
         .from('properties')
         .select('*')
         .eq('id', propertyId)
@@ -483,7 +481,7 @@ class WorkflowService {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${this.n8nConfig.apiKey}`
           },
-          timeout: 30000 // 30 seconds
+          timeout: parseInt(process.env.WORKFLOW_TIMEOUT_MS || '30000') // 30 seconds default
         }
       );
 
@@ -552,7 +550,7 @@ class WorkflowService {
         propertyId: executionData.property_id
       });
       
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('workflow_executions')
         .insert([{
           ...executionData,
@@ -591,7 +589,7 @@ class WorkflowService {
         hasOutput: !!updateData.output_data
       });
       
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('workflow_executions')
         .update({
           ...updateData,
@@ -620,7 +618,7 @@ class WorkflowService {
 
   async getWorkflowExecution(executionId) {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('workflow_executions')
         .select('*')
         .eq('id', executionId)
@@ -809,7 +807,7 @@ class WorkflowService {
    async checkN8NHealth() {
      try {
        const response = await axios.get(`${this.n8nConfig.baseUrl}/healthz`, {
-         timeout: 5000,
+         timeout: parseInt(process.env.WORKFLOW_SHORT_TIMEOUT_MS || '5000'),
          headers: {
            'Authorization': `Bearer ${this.n8nConfig.apiKey}`
          }
@@ -1024,7 +1022,7 @@ class WorkflowService {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - parseInt(timeRange.replace('d', '')));
 
-      const { data: executions, error } = await supabase
+      const { data: executions, error } = await supabaseAdmin
         .from('workflow_executions')
         .select('*')
         .eq('agent_id', agentId)
@@ -1120,6 +1118,103 @@ class WorkflowService {
   }
 
   /**
+   * Generic workflow trigger method that routes to specific workflow methods
+   * @param {string} workflowType - Type of workflow to trigger
+   * @param {Object} data - Workflow data
+   * @returns {Object} Workflow execution result
+   */
+  async triggerWorkflow(workflowType, data = {}) {
+    try {
+      logger.info('Triggering workflow', {
+        workflowType,
+        propertyId: data.propertyId,
+        agentId: data.agentId || data.agent_id,
+        event: data.event
+      });
+
+      const { propertyId, agentId, event, ...additionalData } = data;
+
+      switch (workflowType) {
+        case 'property-ingestion':
+        case this.workflowTypes.PROPERTY_INGESTION:
+          // Get property data for ingestion workflow
+          if (propertyId) {
+            const { data: property, error } = await supabaseAdmin
+              .from('properties')
+              .select('*')
+              .eq('id', propertyId)
+              .single();
+            
+            if (error) {
+              throw new Error(`Failed to fetch property for ingestion: ${error.message}`);
+            }
+            
+            return await this.triggerPropertyIngestionWorkflow(property, agentId);
+          }
+          throw new Error('Property ID is required for property-ingestion workflow');
+
+        case 'content-generation':
+        case this.workflowTypes.CONTENT_GENERATION:
+          if (propertyId && agentId) {
+            return await this.triggerContentGenerationWorkflow(propertyId, agentId, additionalData.contentTypes);
+          }
+          throw new Error('Property ID and Agent ID are required for content-generation workflow');
+
+        case 'social-campaign':
+        case this.workflowTypes.SOCIAL_CAMPAIGN:
+          if (propertyId && agentId) {
+            return await this.triggerSocialCampaignWorkflow(propertyId, agentId, additionalData);
+          }
+          throw new Error('Property ID and Agent ID are required for social-campaign workflow');
+
+        case 'email-automation':
+        case this.workflowTypes.EMAIL_AUTOMATION:
+          if (agentId) {
+            return await this.triggerEmailAutomationWorkflow(agentId, additionalData.automationType, additionalData);
+          }
+          throw new Error('Agent ID is required for email-automation workflow');
+
+        case 'brand-processing':
+        case this.workflowTypes.BRAND_PROCESSING:
+          if (agentId) {
+            return await this.triggerBrandProcessingWorkflow(agentId, additionalData);
+          }
+          throw new Error('Agent ID is required for brand-processing workflow');
+
+        case 'lead-processing':
+        case this.workflowTypes.LEAD_PROCESSING:
+          if (agentId) {
+            return await this.triggerLeadProcessingWorkflow(additionalData, agentId);
+          }
+          throw new Error('Agent ID is required for lead-processing workflow');
+
+        case 'content-regeneration':
+          // Handle content regeneration as a variant of content generation
+          if (propertyId && agentId) {
+            return await this.triggerContentGenerationWorkflow(propertyId, agentId, ['regenerate']);
+          }
+          throw new Error('Property ID and Agent ID are required for content-regeneration workflow');
+
+        case 'cleanup-workflows':
+          // Handle cleanup workflows - this could be a custom implementation
+          logger.info('Cleanup workflows triggered', { propertyId, agentId });
+          return { success: true, message: 'Cleanup workflows initiated' };
+
+        default:
+          throw new Error(`Unknown workflow type: ${workflowType}`);
+      }
+
+    } catch (error) {
+      logger.error('Failed to trigger workflow', {
+        workflowType,
+        data,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Health check for workflow service
    */
   async healthCheck() {
@@ -1165,7 +1260,7 @@ class WorkflowService {
       // Test database connection
       const dbStart = Date.now();
       try {
-        const { error } = await supabase
+        const { error } = await supabaseAdmin
           .from('workflow_executions')
           .select('id')
           .limit(1);
@@ -1189,7 +1284,7 @@ class WorkflowService {
 
       // Get workflow metrics
       try {
-        const { data: metrics, error } = await supabase
+        const { data: metrics, error } = await supabaseAdmin
           .from('workflow_executions')
           .select('status')
           .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());

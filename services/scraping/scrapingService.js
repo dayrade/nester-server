@@ -8,7 +8,7 @@ const config = require('../../config/config');
 class ScrapingService {
   constructor() {
     this.maxRetries = 3;
-    this.retryDelay = 2000;
+    this.retryDelay = parseInt(process.env.SCRAPING_RETRY_DELAY_MS || '2000');
     this.brightDataConfig = {
       endpoint: process.env.BRIGHTDATA_ENDPOINT,
       username: process.env.BRIGHTDATA_USERNAME,
@@ -130,11 +130,11 @@ class ScrapingService {
       // Navigate to the page
       await page.goto(url, { 
         waitUntil: 'networkidle2',
-        timeout: 30000
+        timeout: parseInt(process.env.SCRAPING_TIMEOUT_MS || '30000')
       });
 
       // Wait for content to load
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(parseInt(process.env.SCRAPING_WAIT_TIMEOUT_MS || '3000'));
 
       // Extract property data using selectors
       const propertyData = await page.evaluate(() => {
@@ -270,7 +270,7 @@ class ScrapingService {
           username: this.brightDataConfig.username,
           password: this.brightDataConfig.password
         },
-        timeout: 60000
+        timeout: parseInt(process.env.SCRAPING_LONG_TIMEOUT_MS || '60000')
       });
 
       if (response.data && response.data.success) {

@@ -10,7 +10,7 @@ class DatabaseHealthService {
             lastError: null
         };
         this.maxConsecutiveFailures = 3;
-        this.cacheTimeout = 30000; // 30 seconds
+        this.cacheTimeout = parseInt(process.env.DB_HEALTH_CACHE_TIMEOUT_MS || '30000'); // 30 seconds default
     }
 
     async testConnection(forceCheck = false) {

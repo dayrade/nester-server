@@ -1,11 +1,9 @@
 const axios = require('axios');
-const { createClient } = require('@supabase/supabase-js');
+const { supabaseAdmin } = require('../../config/supabaseClient');
 const config = require('../../config/config');
 const propertyService = require('../property/propertyService');
 const brandService = require('../brand/brandService');
-const socialMediaService = require('../social/socialMediaService');
-
-const supabase = createClient(config.supabase.url, config.supabase.serviceKey);
+const socialMediaService = require('../social/socialService');
 
 class AIService {
   constructor() {
@@ -147,7 +145,7 @@ class AIService {
     try {
       const prompt = this.buildDescriptionPrompt(property, brandAssets);
       
-      const response = await axios.post('https://api.anthropic.com/v1/messages', {
+      const response = await axios.post(`${process.env.ANTHROPIC_API_URL || 'https://api.anthropic.com/v1'}/messages`, {
         model: 'claude-3-sonnet-20240229',
         max_tokens: 1000,
         messages: [{
@@ -217,8 +215,8 @@ class AIService {
    */
   async generateStyledImage(originalImagePath, stylePrompt, styleName) {
     try {
-      const response = await axios.post('https://api.replicate.com/v1/predictions', {
-        version: 'flux-1.1-pro', // Latest Flux model
+      const response = await axios.post(`${process.env.REPLICATE_API_URL || 'https://api.replicate.com/v1'}/predictions`, {
+        version: process.env.REPLICATE_FLUX_MODEL_VERSION || 'flux-1.1-pro', // Latest Flux model
         input: {
           image: originalImagePath,
           prompt: stylePrompt,
@@ -316,7 +314,7 @@ class AIService {
     try {
       const prompt = this.buildSocialPostPrompt(property, brandAssets, theme, archetype);
       
-      const response = await axios.post('https://api.anthropic.com/v1/messages', {
+      const response = await axios.post(`${process.env.ANTHROPIC_API_URL || 'https://api.anthropic.com/v1'}/messages`, {
         model: 'claude-3-sonnet-20240229',
         max_tokens: 500,
         messages: [{
@@ -428,7 +426,7 @@ Ensure content is engaging, on-brand, and platform-appropriate.
     
     while (attempts < maxAttempts) {
       try {
-        const response = await axios.get(`https://api.replicate.com/v1/predictions/${predictionId}`, {
+        const response = await axios.get(`${process.env.REPLICATE_API_URL || 'https://api.replicate.com/v1'}/predictions/${predictionId}`, {
           headers: {
             'Authorization': `Token ${this.replicateApiKey}`
           }
@@ -440,7 +438,7 @@ Ensure content is engaging, on-brand, and platform-appropriate.
           return prediction;
         }
         
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+        await new Promise(resolve => setTimeout(resolve, parseInt(process.env.AI_POLLING_DELAY_MS || '5000'))); // Wait 5 seconds
         attempts++;
         
       } catch (error) {
@@ -457,7 +455,7 @@ Ensure content is engaging, on-brand, and platform-appropriate.
       const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
       const buffer = Buffer.from(response.data);
       
-      const { data, error } = await supabase.storage
+      const { data, error } = await supabaseAdmin.storage
         .from('generated-images')
         .upload(filename, buffer, {
           contentType: 'image/jpeg'
@@ -487,7 +485,7 @@ Ensure content is engaging, on-brand, and platform-appropriate.
       generation_model: 'claude-3-sonnet'
     }));
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('social_posts')
       .insert(posts);
 

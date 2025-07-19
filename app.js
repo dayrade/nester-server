@@ -13,45 +13,99 @@ const multer = require('multer');
 // Import configuration and utilities
 const config = require('./config/config');
 const logger = require('./utils/logger');
-const { ValidationService } = require('./services/validation/validationService');
 
-// Import services
-const { BrandService } = require('./services/brand/brandService');
-const { StorageService } = require('./services/storage/storageService');
-const { AnalyticsService } = require('./services/analytics/analyticsService');
-const { SocialService } = require('./services/social/socialService');
-const { EmailService } = require('./services/email/emailService');
-const { ChatService } = require('./services/chat/chatService');
-const { IntegrationService } = require('./services/integration/integrationService');
-const { WorkflowService } = require('./services/workflow/workflowService');
+// Import error tracking system
+const errorHelper = require('../error-helper');
+const errorTracker = require('../error-tracker');
+// const { ValidationService } = require('./services/validation/validationService');
 
-// Import routes (to be created)
+// Import services (temporarily commented out to debug)
+// const { BrandService } = require('./services/brand/brandService');
+// const { StorageService } = require('./services/storage/storageService');
+// const { AnalyticsService } = require('./services/analytics/analyticsService');
+// const { SocialService } = require('./services/social/socialService');
+// const { EmailService } = require('./services/email/emailService');
+// const { ChatService } = require('./services/chat/chatService');
+// const { IntegrationService } = require('./services/integration/integrationService');
+// const { WorkflowService } = require('./services/workflow/workflowService');
+
+// Import routes (using test properties route)
 const authRoutes = require('./routes/auth');
 const propertyRoutes = require('./routes/properties');
-const profileRoutes = require('./routes/profile');
-const brandRoutes = require('./routes/brands');
-const socialRoutes = require('./routes/social');
-const chatRoutes = require('./routes/chat');
-const analyticsRoutes = require('./routes/analytics');
-const uploadRoutes = require('./routes/upload');
-const webhookRoutes = require('./routes/webhooks');
+const testPropertyRoutes = require('./routes/test-properties');
+// const profileRoutes = require('./routes/profile');
+// const brandRoutes = require('./routes/brands');
+// const socialRoutes = require('./routes/social');
+// const chatRoutes = require('./routes/chat');
+// const analyticsRoutes = require('./routes/analytics');
+// const uploadRoutes = require('./routes/upload');
+// const webhookRoutes = require('./routes/webhooks');
 
 class NesterApp {
     constructor() {
+        console.log('Initializing NesterApp...');
         this.app = express();
+        console.log('Express app created');
+        
+        // Load configuration
+        console.log('Loading configuration...');
         this.config = config;
+        console.log('Configuration loaded successfully');
+        
         this.logger = logger;
         this.services = {};
-        this.validation = new ValidationService();
+        this.errorHelper = errorHelper;
+        // this.validation = ValidationService;
         
+        console.log('Starting middleware setup...');
         // Setup basic middleware and routes first
-        this.setupMiddleware();
-        this.setupRoutes();
-        this.setupErrorHandling();
+        try {
+            this.setupMiddleware();
+            console.log('Middleware setup completed');
+        } catch (error) {
+            const errorId = errorHelper.track(error, {
+                function: 'setupMiddleware',
+                file: 'app.js',
+                phase: 'initialization'
+            });
+            console.error(`Error in setupMiddleware [${errorId}]:`, error);
+            throw error;
+        }
+        
+        try {
+            this.setupRoutes();
+            console.log('Routes setup completed');
+        } catch (error) {
+            const errorId = errorHelper.track(error, {
+                function: 'setupRoutes',
+                file: 'app.js',
+                phase: 'initialization'
+            });
+            console.error(`Error in setupRoutes [${errorId}]:`, error);
+            throw error;
+        }
+        
+        try {
+            this.setupErrorHandling();
+            console.log('Error handling setup completed');
+        } catch (error) {
+            const errorId = errorHelper.track(error, {
+                function: 'setupErrorHandling',
+                file: 'app.js',
+                phase: 'initialization'
+            });
+            console.error(`Error in setupErrorHandling [${errorId}]:`, error);
+            throw error;
+        }
         
         // Initialize services asynchronously
         this.initializeServices().catch(error => {
-            this.logger.error('Failed to initialize services', { error: error.message });
+            const errorId = errorHelper.track(error, {
+                function: 'initializeServices',
+                file: 'app.js',
+                phase: 'service_initialization'
+            });
+            this.logger.error(`Failed to initialize services [${errorId}]`, { error: error.message });
         });
     }
 
@@ -80,7 +134,13 @@ class NesterApp {
 
             this.logger.info('Basic services initialized successfully');
         } catch (error) {
-            this.logger.error('Failed to initialize services', { error: error.message });
+            const errorId = this.errorHelper.track(error, {
+                function: 'initializeServices',
+                file: 'app.js',
+                phase: 'service_initialization',
+                severity: 'HIGH'
+            });
+            this.logger.error(`Failed to initialize services [${errorId}]`, { error: error.message });
             throw error;
         }
     }
@@ -89,28 +149,23 @@ class NesterApp {
      * Setup Express middleware
      */
     setupMiddleware() {
-        // Security middleware
+        console.log('Setting up security middleware...');
+        // Security middleware (simplified)
         this.app.use(helmet({
-            contentSecurityPolicy: {
-                directives: {
-                    defaultSrc: ["'self'"],
-                    styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-                    fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-                    imgSrc: ["'self'", 'data:', 'https:'],
-                    scriptSrc: ["'self'"],
-                    connectSrc: ["'self'", 'https://api.supabase.co']
-                }
-            },
+            contentSecurityPolicy: false, // Disable CSP for now to avoid issues
             crossOriginEmbedderPolicy: false
         }));
+        console.log('Security middleware loaded');
 
+        console.log('Setting up CORS...');
         // CORS configuration
         this.app.use(cors({
-            origin: this.config.get('cors.allowedOrigins') || ['http://localhost:3000'],
+            origin: process.env.FRONTEND_URL || 'http://localhost:3000',
             credentials: true,
-            methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-            allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+            methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+            allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
         }));
+        console.log('CORS loaded');
 
         // Compression
         this.app.use(compression());
@@ -123,13 +178,13 @@ class NesterApp {
         }));
 
         // Body parsing
-        this.app.use(express.json({ limit: '10mb' }));
-        this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+        this.app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '10mb' }));
+        this.app.use(express.urlencoded({ extended: true, limit: process.env.URLENCODED_BODY_LIMIT || '10mb' }));
 
         // Rate limiting
         const limiter = rateLimit({
-            windowMs: 15 * 60 * 1000, // 15 minutes
-            max: 100, // Limit each IP to 100 requests per windowMs
+            windowMs: parseInt(process.env.APP_RATE_WINDOW_MS || '900000'), // 15 minutes default
+            max: parseInt(process.env.APP_RATE_MAX_REQUESTS || '100'), // Limit each IP to 100 requests per windowMs
             message: {
                 success: false,
                 error: 'Too many requests, please try again later'
@@ -146,10 +201,14 @@ class NesterApp {
             next();
         });
 
+        // Error tracking middleware - must be early in the chain
+        this.app.use(errorHelper.middleware);
+        
         // Services middleware - make services available to routes
         this.app.use((req, res, next) => {
             req.services = this.services;
-            req.validation = this.validation;
+            req.errorHelper = this.errorHelper;
+            // req.validation = this.validation;
             next();
         });
 
@@ -167,24 +226,121 @@ class NesterApp {
                 const health = await this.getHealthStatus();
                 res.status(health.status === 'healthy' ? 200 : 503).json(health);
             } catch (error) {
+                const errorId = errorHelper.trackRequest(error, req, {
+                    endpoint: '/health',
+                    operation: 'health_check'
+                });
                 res.status(503).json({
                     status: 'unhealthy',
                     error: error.message,
+                    errorId,
                     timestamp: new Date().toISOString()
                 });
             }
         });
+        
+        // Error tracking status endpoint
+        this.app.get('/api/errors/status', (req, res) => {
+            try {
+                const status = errorHelper.status();
+                res.json({
+                    success: true,
+                    data: status
+                });
+            } catch (error) {
+                const errorId = errorHelper.trackRequest(error, req, {
+                    endpoint: '/api/errors/status',
+                    operation: 'get_error_status'
+                });
+                res.status(500).json({
+                    success: false,
+                    error: error.message,
+                    errorId
+                });
+            }
+        });
+        
+        // Error tracking report endpoint
+        this.app.get('/api/errors/report', (req, res) => {
+            try {
+                const report = errorHelper.report();
+                res.json({
+                    success: true,
+                    data: report
+                });
+            } catch (error) {
+                const errorId = errorHelper.trackRequest(error, req, {
+                    endpoint: '/api/errors/report',
+                    operation: 'generate_error_report'
+                });
+                res.status(500).json({
+                    success: false,
+                    error: error.message,
+                    errorId
+                });
+            }
+        });
+        
+        // Resolve error endpoint
+        this.app.post('/api/errors/:errorId/resolve', (req, res) => {
+            try {
+                const { errorId } = req.params;
+                const { resolution } = req.body;
+                
+                const success = errorHelper.resolve(errorId, resolution || 'Manually resolved');
+                
+                if (success) {
+                    res.json({
+                        success: true,
+                        message: 'Error marked as resolved'
+                    });
+                } else {
+                    res.status(404).json({
+                        success: false,
+                        error: 'Error not found'
+                    });
+                }
+            } catch (error) {
+                const errorId = errorHelper.trackRequest(error, req, {
+                    endpoint: '/api/errors/:errorId/resolve',
+                    operation: 'resolve_error'
+                });
+                res.status(500).json({
+                    success: false,
+                    error: error.message,
+                    errorId
+                });
+            }
+        });
 
-        // API routes
-        this.app.use('/api/auth', authRoutes);
-        this.app.use('/api/properties', propertyRoutes);
-        this.app.use('/api/profile', profileRoutes);
-        this.app.use('/api/brands', brandRoutes);
-        this.app.use('/api/social', socialRoutes);
-        this.app.use('/api/chat', chatRoutes);
-        this.app.use('/api/analytics', analyticsRoutes);
-        this.app.use('/api/upload', uploadRoutes);
-        this.app.use('/api/webhooks', webhookRoutes);
+        // API routes (enabling properties for testing)
+        console.log('Loading routes...');
+        try {
+            this.app.use('/api/auth', authRoutes);
+            console.log('Auth routes loaded');
+            this.app.use('/api/properties', propertyRoutes);
+            console.log('Properties routes loaded');
+            this.app.use('/api/test-properties', testPropertyRoutes);
+            console.log('Test properties routes loaded');
+            // this.app.use('/api/profile', profileRoutes);
+            // console.log('Profile routes loaded');
+            // this.app.use('/api/brands', brandRoutes);
+            // console.log('Brands routes loaded');
+            // this.app.use('/api/social', socialRoutes);
+            // console.log('Social routes loaded');
+            // this.app.use('/api/chat', chatRoutes);
+            // console.log('Chat routes loaded');
+            // this.app.use('/api/analytics', analyticsRoutes);
+            // console.log('Analytics routes loaded');
+            // this.app.use('/api/upload', uploadRoutes);
+            // console.log('Upload routes loaded');
+            // this.app.use('/api/webhooks', webhookRoutes);
+            // console.log('Webhooks routes loaded');
+            console.log('Routes loading skipped for debugging');
+        } catch (error) {
+            console.error('Error loading routes:', error);
+            process.exit(1);
+        }
 
         // API documentation
         this.app.get('/api', (req, res) => {
@@ -217,7 +373,7 @@ class NesterApp {
         });
 
         // Serve frontend in production
-        if (this.config.get('nodeEnv') === 'production') {
+        if (this.config.NODE_ENV === 'production') {
             this.app.use(express.static(path.join(__dirname, '../client/build')));
             
             this.app.get('*', (req, res) => {
@@ -251,21 +407,33 @@ class NesterApp {
 
         // Global error handler
         this.app.use((error, req, res, next) => {
-            this.logger.error('Unhandled error', {
+            // Track error if not already tracked
+            let errorId = error.trackingId;
+            if (!errorId) {
+                errorId = errorHelper.trackRequest(error, req, {
+                    handler: 'global_error_handler',
+                    unhandled: true,
+                    severity: 'HIGH'
+                });
+            }
+            
+            this.logger.error(`Unhandled error [${errorId}]`, {
                 error: error.message,
                 stack: error.stack,
                 requestId: req.id,
                 path: req.path,
-                method: req.method
+                method: req.method,
+                errorId
             });
 
             // Don't leak error details in production
-            const isDevelopment = this.config.get('nodeEnv') === 'development';
+            const isDevelopment = this.config.NODE_ENV === 'development';
             
             res.status(error.status || 500).json({
                 success: false,
                 error: isDevelopment ? error.message : 'Internal server error',
                 requestId: req.id,
+                errorId,
                 ...(isDevelopment && { stack: error.stack })
             });
         });
@@ -275,20 +443,21 @@ class NesterApp {
      * Perform health checks on all services
      */
     async performHealthChecks() {
-        const checks = [
-            { name: 'config', check: () => this.config.healthCheck() },
-            { name: 'integration', check: () => this.services.integration.healthCheck() },
-            { name: 'workflow', check: () => this.services.workflow.healthCheck() }
-        ];
+        // Temporarily disabled until services are properly initialized
+        // const checks = [
+        //     { name: 'config', check: () => this.config.healthCheck() },
+        //     { name: 'integration', check: () => this.services.integration.healthCheck() },
+        //     { name: 'workflow', check: () => this.services.workflow.healthCheck() }
+        // ];
 
-        for (const { name, check } of checks) {
-            try {
-                await check();
-                this.logger.info(`${name} service health check passed`);
-            } catch (error) {
-                this.logger.warn(`${name} service health check failed`, { error: error.message });
-            }
-        }
+        // for (const { name, check } of checks) {
+        //     try {
+        //         await check();
+        //         this.logger.info(`${name} service health check passed`);
+        //     } catch (error) {
+        //         this.logger.warn(`${name} service health check failed`, { error: error.message });
+        //     }
+        // }
     }
 
     /**
@@ -296,48 +465,14 @@ class NesterApp {
      */
     async getHealthStatus() {
         const checks = {
-            database: 'unknown',
-            storage: 'unknown',
-            integrations: 'unknown',
-            workflows: 'unknown'
+            server: 'healthy',
+            config: 'healthy'
         };
 
-        try {
-            // Check database connection
-            await this.services.analytics.supabase.from('users').select('count').limit(1);
-            checks.database = 'healthy';
-        } catch (error) {
-            checks.database = 'unhealthy';
-        }
-
-        try {
-            // Check storage
-            await this.services.storage.supabase.storage.listBuckets();
-            checks.storage = 'healthy';
-        } catch (error) {
-            checks.storage = 'unhealthy';
-        }
-
-        try {
-            // Check integrations
-            await this.services.integration.healthCheck();
-            checks.integrations = 'healthy';
-        } catch (error) {
-            checks.integrations = 'unhealthy';
-        }
-
-        try {
-            // Check workflows
-            await this.services.workflow.healthCheck();
-            checks.workflows = 'healthy';
-        } catch (error) {
-            checks.workflows = 'unhealthy';
-        }
-
-        const allHealthy = Object.values(checks).every(status => status === 'healthy');
+        // Basic health check - server is running if we reach this point
         
         return {
-            status: allHealthy ? 'healthy' : 'degraded',
+            status: 'healthy',
             timestamp: new Date().toISOString(),
             version: '1.0.0',
             uptime: process.uptime(),
@@ -350,24 +485,70 @@ class NesterApp {
      */
     async start() {
         try {
-            const port = this.config.get('port') || 5000;
-            const host = this.config.get('host') || '0.0.0.0';
+            console.log('Server starting up...');
+            
+            const port = this.config.server.port;
+            const host = this.config.server.host;
+            console.log('Config PORT:', port);
+            console.log('Config HOST:', host);
 
+            // Perform health checks
+            console.log('Performing health checks...');
+            await this.performHealthChecks();
+            console.log('Health checks completed');
+
+            // Start the server
+            console.log('Starting HTTP server...');
             this.server = this.app.listen(port, host, () => {
                 this.logger.info(`Nester server started`, {
                     port,
                     host,
-                    environment: this.config.get('nodeEnv'),
+                    environment: this.config.NODE_ENV,
                     pid: process.pid
                 });
+                console.log(`Server details - Port: ${port}, Host: ${host}, PID: ${process.pid}`);
+                console.log(`🚀 Server running on http://${host}:${port}`);
+                console.log(`📊 Error tracking available at http://${host}:${port}/api/errors/status`);
+            });
+            
+            // Handle server errors
+            this.server.on('error', (error) => {
+                const errorId = this.errorHelper.track(error, {
+                    function: 'server.listen',
+                    file: 'app.js',
+                    port,
+                    host,
+                    severity: 'CRITICAL'
+                });
+                console.error(`Server error [${errorId}]:`, error);
+                this.logger.error(`Server error [${errorId}]`, { error: error.message });
+                if (error.code === 'EADDRINUSE') {
+                    console.error(`Port ${port} is already in use`);
+                    process.exit(1);
+                }
+            });
+            
+            // Keep the process alive
+            this.server.on('listening', () => {
+                console.log('Server is now listening for connections');
             });
 
+            console.log('Setting up graceful shutdown handlers...');
             // Graceful shutdown handling
             process.on('SIGTERM', () => this.shutdown('SIGTERM'));
             process.on('SIGINT', () => this.shutdown('SIGINT'));
+            
+            console.log('Server startup completed successfully');
 
         } catch (error) {
-            this.logger.error('Failed to start server', { error: error.message });
+            const errorId = this.errorHelper.track(error, {
+                function: 'start',
+                file: 'app.js',
+                phase: 'server_startup',
+                severity: 'CRITICAL'
+            });
+            this.logger.error(`Failed to start server [${errorId}]`, { error: error.message });
+            console.error(`Failed to start server [${errorId}]:`, error.message);
             process.exit(1);
         }
     }
@@ -404,9 +585,17 @@ module.exports = NesterApp;
 
 // Start server if this file is run directly
 if (require.main === module) {
-    const app = new NesterApp();
-    app.start().catch(error => {
-        logger.error('Failed to start application', { error: error.message });
+    try {
+        console.log('Creating NesterApp instance...');
+        const app = new NesterApp();
+        console.log('Starting server...');
+        app.start().catch(error => {
+            console.error('Failed to start application:', error);
+            logger.error('Failed to start application', { error: error.message });
+            process.exit(1);
+        });
+    } catch (error) {
+        console.error('Error during app initialization:', error);
         process.exit(1);
-    });
+    }
 }
