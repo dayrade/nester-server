@@ -1,6 +1,6 @@
 const config = require('../../config/config');
 const logger = require('../../utils/logger');
-const { StorageService } = require('../storage/storageService');
+const storageService = require('../storage/storageService');
 const validationService = require('../validation/validationService');
 const { supabaseAdmin } = require('../../config/supabaseClient');
 
@@ -9,7 +9,7 @@ const supabase = supabaseAdmin;
 class BrandService {
   constructor() {
     this.supabase = supabase;
-    this.storageService = new StorageService();
+    this.storageService = storageService;
     this.validationService = validationService;
     
     // Default Nester branding

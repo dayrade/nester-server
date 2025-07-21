@@ -17,103 +17,10 @@ const createProperty = async (req, res) => {
       body: req.body
     });
     
-    // Temporarily disable auth requirement for testing
-    // Create or use a test user ID that exists in the database
-    let agentId = req.user?.id;
+    const agentId = req.user?.id;
+    console.log('agentId',agentId)
     if (!agentId) {
-      // Try to create a test user if it doesn't exist
-      const testUserId = '11111111-1111-1111-1111-111111111111';
-      try {
-        const { supabaseAdmin } = require('../config/supabaseClient');
-        
-        logger.info('Attempting to create/find test user', { testUserId });
-        
-        // Check if test user exists in auth.users
-        const { data: authUser, error: authCheckError } = await supabaseAdmin.auth.admin.getUserById(testUserId);
-        
-        if (authCheckError && authCheckError.message !== 'User not found') {
-          logger.error('Error checking auth user:', authCheckError);
-          throw authCheckError;
-        }
-        
-        if (!authUser.user) {
-          logger.info('Test user not found in auth, creating new one');
-          // Create user in auth.users first
-          const { data: newAuthUser, error: authCreateError } = await supabaseAdmin.auth.admin.createUser({
-            user_id: testUserId,
-            email: 'test@example.com',
-            password: 'test123456',
-            email_confirm: true
-          });
-          
-          if (authCreateError) {
-            // If user already exists with this email, try to find them
-            if (authCreateError.message.includes('already been registered')) {
-              logger.info('User with email already exists, trying to find existing user');
-              const { data: existingUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers();
-              if (listError) {
-                logger.error('Error listing users:', listError);
-                throw listError;
-              }
-              
-              const existingUser = existingUsers.users.find(u => u.email === 'test@example.com');
-               if (existingUser) {
-                  logger.info('Found existing user with test email', { userId: existingUser.id });
-                  // Use the actual existing user ID, not the hardcoded test ID
-                  agentId = existingUser.id;
-                 
-                 // Ensure the public.users record exists
-                 const { data: publicUser, error: publicCheckError } = await supabaseAdmin
-                   .from('users')
-                   .select('id')
-                   .eq('id', existingUser.id)
-                   .single();
-                 
-                 if (publicCheckError && publicCheckError.code === 'PGRST116') {
-                   logger.info('Public user record not found, creating it');
-                   const { error: publicInsertError } = await supabaseAdmin
-                     .from('users')
-                     .insert({
-                       id: existingUser.id,
-                       email: existingUser.email,
-                       role: 'agent'
-                     });
-                   
-                   if (publicInsertError) {
-                     logger.error('Error creating public user record:', publicInsertError);
-                     throw publicInsertError;
-                   }
-                   
-                   logger.info('Public user record created successfully');
-                 } else if (publicCheckError) {
-                   logger.error('Error checking public user:', publicCheckError);
-                   throw publicCheckError;
-                 } else {
-                   logger.info('Public user record already exists');
-                 }
-               } else {
-                 throw new Error('Could not find existing user with test email');
-               }
-            } else {
-              logger.error('Error creating auth user:', authCreateError);
-              throw authCreateError;
-            }
-          } else {
-            logger.info('Test auth user created successfully', { userId: newAuthUser.user.id });
-            
-            // The trigger should automatically create the public.users record
-            // Wait a moment for the trigger to execute
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            agentId = testUserId;
-          }
-        } else {
-          logger.info('Test user already exists in auth');
-          agentId = testUserId;
-        }
-      } catch (error) {
-        logger.error('Failed to create/find test user:', { error: error.message, stack: error.stack });
-        return res.status(500).json({ error: `Failed to create test user: ${error.message}` });
-      }
+      return res.status(401).json({ error: 'Authentication required' });
     }
     
     const propertyData = req.body;
@@ -128,10 +35,46 @@ const createProperty = async (req, res) => {
 
     const property = await propertyService.createProperty(propertyData, agentId);
     
+    // Automatically trigger content generation for new properties
+    try {
+      const aiService = require('../services/ai/aiService');
+      const contentTypes = ['description', 'social_posts'];
+      
+      // Get the full property data with images for content generation
+      const fullProperty = await propertyService.getPropertyById(property.id, agentId, {
+        includeImages: true,
+        includeSocialPosts: false
+      });
+      
+      if (fullProperty) {
+        // Start content generation asynchronously (don't wait for completion)
+        aiService.generatePropertyContent(fullProperty, contentTypes)
+          .then(contentJob => {
+            logger.info('Content generation started for new property', {
+              propertyId: property.id,
+              jobId: contentJob.id,
+              contentTypes
+            });
+          })
+          .catch(error => {
+            logger.warn('Failed to start content generation for new property', {
+              propertyId: property.id,
+              error: error.message
+            });
+          });
+      }
+    } catch (error) {
+      // Don't fail property creation if content generation fails
+      logger.warn('Content generation setup failed for new property', {
+        propertyId: property.id,
+        error: error.message
+      });
+    }
+    
     res.status(201).json({
       success: true,
       data: property,
-      message: 'Property created successfully'
+      message: 'Property created successfully. Content generation started automatically.'
     });
   } catch (error) {
     const errorId = errorHelper.trackRequest(error, req, {
@@ -349,33 +292,50 @@ const scrapePropertyFromUrl = async (req, res) => {
  */
 const generatePropertyContent = async (req, res) => {
   try {
+    const agentId = req.user?.id;
+    if (!agentId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
     const { id } = req.params;
+    const { contentTypes = ['description', 'images', 'social_posts'] } = req.body;
+    
+    // Get property data
+    const property = await propertyService.getPropertyById(id, agentId, {
+      includeImages: true,
+      includeSocialPosts: false
+    });
+    
+    if (!property) {
+      return res.status(404).json({ error: 'Property not found' });
+    }
+
+    // Import AI service
+    const aiService = require('../services/ai/aiService');
+    
+    // Generate content using AI service
+    const contentJob = await aiService.generatePropertyContent(property, contentTypes);
     
     res.json({
       success: true,
       data: {
         propertyId: id,
-        generatedContent: {
-          description: 'Beautiful property with modern amenities...',
-          marketingCopy: 'Don\'t miss this opportunity...',
-          socialMediaPosts: [
-            'Check out this amazing property! #RealEstate',
-            'New listing alert! Beautiful home available now.'
-          ]
-        },
-        status: 'completed'
+        jobId: contentJob.id,
+        status: contentJob.status,
+        contentTypes: contentJob.contentTypes
       },
-      message: 'Content generated successfully (mock)'
+      message: 'Content generation started successfully'
     });
   } catch (error) {
     const errorId = errorHelper.trackRequest(error, req, {
       endpoint: `/api/properties/${req.params.id}/generate-content`,
       operation: 'generate_property_content',
-      propertyId: req.params.id
+      propertyId: req.params.id,
+      agentId: req.user?.id
     });
-    console.error(`Error generating property content [${errorId}]:`, error);
+    logger.error(`Error generating property content [${errorId}]:`, error);
     res.status(500).json({ 
-      error: 'Internal server error',
+      error: error.message || 'Internal server error',
       errorId
     });
   }
@@ -387,13 +347,10 @@ const generatePropertyContent = async (req, res) => {
 const getPropertyImages = async (req, res) => {
   try {
     const { id } = req.params;
-    // Temporarily bypass authentication for testing
-    const agentId = req.user?.id || 'test-agent-123';
-    
-    // Temporarily disabled for testing
-    // if (!agentId) {
-    //   return res.status(401).json({ error: 'Authentication required' });
-    // }
+    const agentId = req.user?.id;
+    if (!agentId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
     
     const images = await storageService.getPropertyImages(id, agentId);
     
@@ -422,28 +379,25 @@ const getPropertyImages = async (req, res) => {
 const uploadPropertyImage = async (req, res) => {
   try {
     const { id } = req.params;
-    // Temporarily bypass authentication for testing
-    const agentId = req.user?.id || 'test-agent-123';
-    
-    // Temporarily disabled for testing
-    // if (!agentId) {
-    //   return res.status(401).json({ error: 'Authentication required' });
-    // }
+    const agentId = req.user?.id;
+    if (!agentId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
     
     if (!req.file) {
       return res.status(400).json({ error: 'No image file provided' });
     }
     
-    // Temporarily bypass property verification for testing
-    // const property = await propertyService.getPropertyById(id, agentId);
-    // if (!property) {
-    //   return res.status(404).json({ error: 'Property not found' });
-    // }
+    const property = await propertyService.getPropertyById(id, agentId);
+    if (!property) {
+      return res.status(404).json({ error: 'Property not found' });
+    }
     
     const options = {
       isPrimary: req.body.isPrimary === 'true',
       altText: req.body.altText || '',
-      displayOrder: parseInt(req.body.displayOrder) || 0
+      displayOrder: parseInt(req.body.displayOrder) || 0,
+      roomType: req.body.roomType || null
     };
     
     const uploadResult = await storageService.uploadPropertyImage(id, agentId, req.file, options);
@@ -476,19 +430,15 @@ const uploadPropertyImage = async (req, res) => {
 const deletePropertyImage = async (req, res) => {
   try {
     const { id, imageId } = req.params;
-    // Temporarily bypass authentication for testing
-    const agentId = req.user?.id || 'test-agent-123';
+    const agentId = req.user?.id;
+    if (!agentId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
     
-    // Temporarily disabled for testing
-    // if (!agentId) {
-    //   return res.status(401).json({ error: 'Authentication required' });
-    // }
-    
-    // Temporarily bypass property verification for testing
-    // const property = await propertyService.getPropertyById(id, agentId);
-    // if (!property) {
-    //   return res.status(404).json({ error: 'Property not found' });
-    // }
+    const property = await propertyService.getPropertyById(id, agentId);
+    if (!property) {
+      return res.status(404).json({ error: 'Property not found' });
+    }
     
     const deleted = await storageService.deletePropertyImage(imageId);
     

@@ -172,7 +172,8 @@ class StorageService {
         storage_path: imageVariants.original,
         alt_text: options.altText || '',
         display_order: options.displayOrder || 0,
-        is_primary: options.isPrimary || false
+        is_primary: options.isPrimary || false,
+        room_type: options.roomType || null
       };
 
       const { data, error } = await supabase

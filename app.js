@@ -9,6 +9,7 @@ const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const multer = require('multer');
+const cookieParser = require('cookie-parser');
 
 // Import configuration and utilities
 const config = require('./config/config');
@@ -33,7 +34,7 @@ const errorTracker = require('../error-tracker');
 const authRoutes = require('./routes/auth');
 const propertyRoutes = require('./routes/properties');
 const testPropertyRoutes = require('./routes/test-properties');
-// const profileRoutes = require('./routes/profile');
+const profileRoutes = require('./routes/profile');
 // const brandRoutes = require('./routes/brands');
 // const socialRoutes = require('./routes/social');
 // const chatRoutes = require('./routes/chat');
@@ -180,6 +181,9 @@ class NesterApp {
         // Body parsing
         this.app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '10mb' }));
         this.app.use(express.urlencoded({ extended: true, limit: process.env.URLENCODED_BODY_LIMIT || '10mb' }));
+        
+        // Cookie parsing
+        this.app.use(cookieParser());
 
         // Rate limiting
         const limiter = rateLimit({
@@ -322,8 +326,8 @@ class NesterApp {
             console.log('Properties routes loaded');
             this.app.use('/api/test-properties', testPropertyRoutes);
             console.log('Test properties routes loaded');
-            // this.app.use('/api/profile', profileRoutes);
-            // console.log('Profile routes loaded');
+            this.app.use('/api/profile', profileRoutes);
+            console.log('Profile routes loaded');
             // this.app.use('/api/brands', brandRoutes);
             // console.log('Brands routes loaded');
             // this.app.use('/api/social', socialRoutes);
@@ -386,6 +390,33 @@ class NesterApp {
      * Setup error handling middleware
      */
     setupErrorHandling() {
+        // Process-level error handlers to prevent crashes
+        process.on('uncaughtException', (error) => {
+            const errorId = this.errorHelper.track(error, {
+                handler: 'uncaughtException',
+                severity: 'CRITICAL'
+            });
+            this.logger.error(`Uncaught Exception [${errorId}]`, {
+                error: error.message,
+                stack: error.stack
+            });
+            // Don't exit the process, just log the error
+        });
+
+        process.on('unhandledRejection', (reason, promise) => {
+            const errorId = this.errorHelper.track(reason, {
+                handler: 'unhandledRejection',
+                severity: 'HIGH',
+                promise: promise.toString()
+            });
+            this.logger.error(`Unhandled Rejection [${errorId}]`, {
+                reason: reason?.message || reason,
+                stack: reason?.stack,
+                promise: promise.toString()
+            });
+            // Don't exit the process, just log the error
+        });
+
         // Multer error handling
         this.app.use((error, req, res, next) => {
             if (error instanceof multer.MulterError) {

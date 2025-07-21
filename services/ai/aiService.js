@@ -1,9 +1,13 @@
 const axios = require('axios');
 const { supabaseAdmin } = require('../../config/supabaseClient');
 const config = require('../../config/config');
-const propertyService = require('../property/propertyService');
-const brandService = require('../brand/brandService');
+// Use dynamic import to avoid circular dependency
+// const propertyService = require('../property/propertyService');
+const { BrandService } = require('../brand/brandService');
 const socialMediaService = require('../social/socialService');
+
+// Create brandService instance
+const brandService = new BrandService();
 
 class AIService {
   constructor() {
@@ -54,6 +58,9 @@ class AIService {
     const jobId = this.generateJobId();
     
     try {
+      // Use dynamic import to avoid circular dependency
+      const propertyService = require('../property/propertyService');
+      
       // Update property status
       await propertyService.updateContentGenerationStatus(
         property.id,
@@ -119,6 +126,9 @@ class AIService {
         results.emailTemplates = await this.generateEmailTemplates(property, brandAssets);
       }
 
+      // Use dynamic import to avoid circular dependency
+      const propertyService = require('../property/propertyService');
+      
       // Update property with generated content
       await propertyService.updateProperty(property.id, {
         description: results.description || property.description,
@@ -131,6 +141,9 @@ class AIService {
     } catch (error) {
       console.error(`Content generation failed for property ${property.id}:`, error);
       
+      // Use dynamic import to avoid circular dependency
+      const propertyService = require('../property/propertyService');
+      
       await propertyService.updateContentGenerationStatus(
         property.id,
         'failed'
@@ -139,14 +152,14 @@ class AIService {
   }
 
   /**
-   * Generate enhanced property description using Claude
+   * Generate enhanced property description using OpenAI
    */
   async generatePropertyDescription(property, brandAssets) {
     try {
       const prompt = this.buildDescriptionPrompt(property, brandAssets);
       
-      const response = await axios.post(`${process.env.ANTHROPIC_API_URL || 'https://api.anthropic.com/v1'}/messages`, {
-        model: 'claude-3-sonnet-20240229',
+      const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+        model: 'gpt-4',
         max_tokens: 1000,
         messages: [{
           role: 'user',
@@ -154,13 +167,12 @@ class AIService {
         }]
       }, {
         headers: {
-          'Authorization': `Bearer ${this.claudeApiKey}`,
-          'Content-Type': 'application/json',
-          'x-api-key': this.claudeApiKey
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
         }
       });
 
-      return response.data.content[0].text;
+      return response.data.choices[0].message.content;
       
     } catch (error) {
       console.error('Failed to generate property description:', error);
@@ -314,8 +326,8 @@ class AIService {
     try {
       const prompt = this.buildSocialPostPrompt(property, brandAssets, theme, archetype);
       
-      const response = await axios.post(`${process.env.ANTHROPIC_API_URL || 'https://api.anthropic.com/v1'}/messages`, {
-        model: 'claude-3-sonnet-20240229',
+      const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+        model: 'gpt-4',
         max_tokens: 500,
         messages: [{
           role: 'user',
@@ -323,13 +335,12 @@ class AIService {
         }]
       }, {
         headers: {
-          'Authorization': `Bearer ${this.claudeApiKey}`,
-          'Content-Type': 'application/json',
-          'x-api-key': this.claudeApiKey
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
         }
       });
 
-      const content = JSON.parse(response.data.content[0].text);
+      const content = JSON.parse(response.data.choices[0].message.content);
       
       // Generate visual content for different aspect ratios
       const visuals = await this.generateSocialVisuals(property, content, day);

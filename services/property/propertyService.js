@@ -553,7 +553,7 @@ class PropertyService {
       updateData.scraping_error = error;
     }
     
-    const { data, error: updateError } = await supabase
+    const { data, error: updateError } = await this.supabase
       .from('properties')
       .update(updateData)
       .eq('id', propertyId)
@@ -586,7 +586,7 @@ class PropertyService {
       updateData.content_generation_completed_at = new Date().toISOString();
     }
     
-    const { data, error } = await supabase
+    const { data, error } = await this.supabase
       .from('properties')
       .update(updateData)
       .eq('id', propertyId)

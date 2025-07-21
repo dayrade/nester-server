@@ -1,0 +1,421 @@
+-- Nester Database Schema Setup
+-- Complete schema with all necessary types, extensions, and tables
+
+-- Enable necessary extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Create custom types
+DO $$ BEGIN
+    CREATE TYPE user_role AS ENUM ('agent', 'admin', 'viewer');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE property_type AS ENUM ('house', 'condo', 'townhouse', 'apartment', 'land', 'commercial');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE listing_status AS ENUM ('active', 'pending', 'sold', 'withdrawn', 'processing', 'error');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE social_platform AS ENUM ('instagram', 'facebook', 'twitter', 'linkedin', 'tiktok', 'youtube');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE post_status AS ENUM ('draft', 'scheduled', 'published', 'failed');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE brand_tier AS ENUM ('nester_default', 'nester_plus', 'white_label');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE image_style AS ENUM ('original', 'enhanced', 'virtual_staging');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE workflow_status AS ENUM ('pending', 'running', 'completed', 'failed', 'cancelled');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE content_archetype AS ENUM ('lifestyle', 'luxury', 'family', 'investment', 'first_time_buyer');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.agent_brands (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  agent_id uuid NOT NULL UNIQUE,
+  has_custom_branding boolean DEFAULT false,
+  brand_tier brand_tier DEFAULT 'nester_default',
+  company_name text,
+  logo_storage_path text,
+  primary_color text DEFAULT '#2563eb'::text,
+  secondary_color text DEFAULT '#64748b'::text,
+  font_family text DEFAULT 'Inter'::text,
+  persona_tone text DEFAULT 'Professional & Authoritative'::text,
+  persona_style text DEFAULT 'Concise & Factual'::text,
+  persona_key_phrases text[],
+  persona_phrases_to_avoid text[],
+  nester_logo_path text DEFAULT '/assets/nester-logo.svg'::text,
+  nester_primary_color text DEFAULT '#2563eb'::text,
+  nester_secondary_color text DEFAULT '#64748b'::text,
+  nester_font_family text DEFAULT 'Inter'::text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT agent_brands_pkey PRIMARY KEY (id),
+  CONSTRAINT agent_brands_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.users(id)
+);
+CREATE TABLE IF NOT EXISTS public.chat_sessions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  property_id uuid,
+  title text,
+  messages jsonb NOT NULL DEFAULT '[]'::jsonb,
+  session_type text DEFAULT 'general'::text,
+  is_active boolean DEFAULT true,
+  visitor_email text,
+  questions_asked text[],
+  interests_detected text[],
+  session_duration integer,
+  retention_expires_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT chat_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT chat_sessions_property_id_fkey FOREIGN KEY (property_id) REFERENCES public.properties(id),
+  CONSTRAINT chat_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE IF NOT EXISTS public.content_templates (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  name text NOT NULL,
+  category text NOT NULL,
+  template_type text NOT NULL,
+  content text NOT NULL,
+  variables jsonb DEFAULT '{}'::jsonb,
+  brand_customizable boolean DEFAULT true,
+  usage_count integer DEFAULT 0,
+  is_active boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT content_templates_pkey PRIMARY KEY (id)
+);
+CREATE TABLE IF NOT EXISTS public.error_logs (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  error_type text NOT NULL,
+  error_message text NOT NULL,
+  stack_trace text,
+  property_id uuid,
+  user_id uuid,
+  workflow_name text,
+  api_endpoint text,
+  request_data jsonb,
+  resolved_at timestamp with time zone,
+  resolution_notes text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT error_logs_pkey PRIMARY KEY (id),
+  CONSTRAINT error_logs_property_id_fkey FOREIGN KEY (property_id) REFERENCES public.properties(id),
+  CONSTRAINT error_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE IF NOT EXISTS public.leads (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  property_id uuid NOT NULL,
+  chat_session_id uuid,
+  email text NOT NULL,
+  phone text,
+  name text,
+  source text,
+  interests text[],
+  buyer_persona text,
+  quality_score integer DEFAULT 0,
+  contacted_at timestamp with time zone,
+  follow_up_notes text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT leads_pkey PRIMARY KEY (id),
+  CONSTRAINT leads_chat_session_id_fkey FOREIGN KEY (chat_session_id) REFERENCES public.chat_sessions(id),
+  CONSTRAINT leads_property_id_fkey FOREIGN KEY (property_id) REFERENCES public.properties(id)
+);
+CREATE TABLE IF NOT EXISTS public.properties (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  agent_id uuid NOT NULL,
+  address text NOT NULL,
+  price integer,
+  bedrooms integer,
+  bathrooms numeric,
+  square_feet integer,
+  property_type property_type DEFAULT 'house',
+  description text,
+  features text[],
+  source_url text,
+  input_method text DEFAULT 'form',
+  processing_status listing_status DEFAULT 'processing',
+  listing_status listing_status DEFAULT 'active',
+  microsite_slug text UNIQUE,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  content_generation_job_id text,
+  content_generation_status text,
+  content_generation_started_at timestamp with time zone,
+  content_generation_completed_at timestamp with time zone,
+  CONSTRAINT properties_pkey PRIMARY KEY (id),
+  CONSTRAINT properties_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.users(id)
+);
+CREATE TABLE IF NOT EXISTS public.property_images (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  property_id uuid NOT NULL,
+  storage_path text NOT NULL,
+  original_url text,
+  room_type text,
+  style image_style DEFAULT 'original',
+  aspect_ratio text,
+  display_order integer DEFAULT 0,
+  is_primary boolean DEFAULT false,
+  alt_text text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT property_images_pkey PRIMARY KEY (id),
+  CONSTRAINT property_images_property_id_fkey FOREIGN KEY (property_id) REFERENCES public.properties(id)
+);
+CREATE TABLE IF NOT EXISTS public.property_stats (
+  property_id uuid NOT NULL,
+  date date NOT NULL,
+  website_impressions integer DEFAULT 0,
+  website_clicks integer DEFAULT 0,
+  unique_visitors integer DEFAULT 0,
+  pdf_downloads integer DEFAULT 0,
+  chat_sessions integer DEFAULT 0,
+  leads_captured integer DEFAULT 0,
+  total_social_impressions integer DEFAULT 0,
+  total_social_engagements integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT property_stats_pkey PRIMARY KEY (property_id, date),
+  CONSTRAINT property_stats_property_id_fkey FOREIGN KEY (property_id) REFERENCES public.properties(id)
+);
+CREATE TABLE IF NOT EXISTS public.social_posts (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  property_id uuid NOT NULL,
+  platform social_platform NOT NULL,
+  content text NOT NULL,
+  hashtags text[],
+  week_theme text,
+  content_archetype content_archetype,
+  image_paths text[],
+  status post_status DEFAULT 'draft',
+  scheduled_for timestamp with time zone,
+  published_at timestamp with time zone,
+  external_post_id text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT social_posts_pkey PRIMARY KEY (id),
+  CONSTRAINT social_posts_property_id_fkey FOREIGN KEY (property_id) REFERENCES public.properties(id)
+);
+CREATE TABLE IF NOT EXISTS public.social_stats (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  social_post_id uuid NOT NULL,
+  views integer DEFAULT 0,
+  likes integer DEFAULT 0,
+  comments integer DEFAULT 0,
+  shares integer DEFAULT 0,
+  clicks integer DEFAULT 0,
+  saves integer DEFAULT 0,
+  engagement_rate numeric DEFAULT 0,
+  last_updated timestamp with time zone DEFAULT now(),
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT social_stats_pkey PRIMARY KEY (id),
+  CONSTRAINT social_stats_social_post_id_fkey FOREIGN KEY (social_post_id) REFERENCES public.social_posts(id)
+);
+CREATE TABLE IF NOT EXISTS public.users (
+  id uuid NOT NULL,
+  email text NOT NULL UNIQUE,
+  role user_role DEFAULT 'agent',
+  timezone text DEFAULT 'UTC'::text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  full_name text,
+  phone text,
+  bio text,
+  website text,
+  license_number text,
+  brokerage text,
+  avatar_url text,
+  location text,
+  years_experience integer,
+  specialties text[],
+  CONSTRAINT users_pkey PRIMARY KEY (id),
+  CONSTRAINT users_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+);
+CREATE TABLE IF NOT EXISTS public.workflow_executions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  workflow_type text NOT NULL,
+  agent_id uuid NOT NULL,
+  property_id uuid,
+  status workflow_status DEFAULT 'pending',
+  n8n_execution_id text,
+  n8n_workflow_id text,
+  input_data jsonb,
+  output_data jsonb,
+  n8n_data jsonb,
+  error_message text,
+  retry_count integer DEFAULT 0,
+  max_retries integer DEFAULT 3,
+  last_retry_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  started_at timestamp with time zone,
+  completed_at timestamp with time zone,
+  failed_at timestamp with time zone,
+  CONSTRAINT workflow_executions_pkey PRIMARY KEY (id),
+  CONSTRAINT workflow_executions_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.users(id),
+  CONSTRAINT workflow_executions_property_id_fkey FOREIGN KEY (property_id) REFERENCES public.properties(id)
+);
+
+-- Create indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_properties_agent_id ON public.properties(agent_id);
+CREATE INDEX IF NOT EXISTS idx_properties_status ON public.properties(listing_status);
+CREATE INDEX IF NOT EXISTS idx_properties_created_at ON public.properties(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_property_images_property_id ON public.property_images(property_id);
+CREATE INDEX IF NOT EXISTS idx_property_images_primary ON public.property_images(property_id, is_primary);
+CREATE INDEX IF NOT EXISTS idx_social_posts_property_id ON public.social_posts(property_id);
+CREATE INDEX IF NOT EXISTS idx_social_posts_platform ON public.social_posts(platform);
+CREATE INDEX IF NOT EXISTS idx_social_posts_status ON public.social_posts(status);
+CREATE INDEX IF NOT EXISTS idx_social_stats_post_id ON public.social_stats(social_post_id);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON public.chat_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_agent_brands_agent_id ON public.agent_brands(agent_id);
+CREATE INDEX IF NOT EXISTS idx_leads_property_id ON public.leads(property_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_executions_agent_id ON public.workflow_executions(agent_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_executions_property_id ON public.workflow_executions(property_id);
+CREATE INDEX IF NOT EXISTS idx_error_logs_user_id ON public.error_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_error_logs_property_id ON public.error_logs(property_id);
+
+-- Utility functions
+CREATE OR REPLACE FUNCTION check_user_exists(user_email TEXT)
+RETURNS BOOLEAN AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM public.users WHERE email = user_email
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to update timestamps
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create triggers for updated_at columns
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON public.users
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_agent_brands_updated_at BEFORE UPDATE ON public.agent_brands
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_properties_updated_at BEFORE UPDATE ON public.properties
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_social_posts_updated_at BEFORE UPDATE ON public.social_posts
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_chat_sessions_updated_at BEFORE UPDATE ON public.chat_sessions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_leads_updated_at BEFORE UPDATE ON public.leads
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_workflow_executions_updated_at BEFORE UPDATE ON public.workflow_executions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_content_templates_updated_at BEFORE UPDATE ON public.content_templates
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Enable Row Level Security (RLS) for multi-tenant support
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_brands ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.properties ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.property_images ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.social_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.social_stats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chat_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.workflow_executions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.error_logs ENABLE ROW LEVEL SECURITY;
+
+-- Basic RLS policies (users can only access their own data)
+CREATE POLICY "Users can view own profile" ON public.users
+    FOR SELECT USING (auth.uid() = id);
+
+CREATE POLICY "Users can update own profile" ON public.users
+    FOR UPDATE USING (auth.uid() = id);
+
+CREATE POLICY "Agents can view own brand" ON public.agent_brands
+    FOR ALL USING (auth.uid() = agent_id);
+
+CREATE POLICY "Agents can view own properties" ON public.properties
+    FOR ALL USING (auth.uid() = agent_id);
+
+CREATE POLICY "Property images follow property access" ON public.property_images
+    FOR ALL USING (EXISTS (
+        SELECT 1 FROM public.properties 
+        WHERE properties.id = property_images.property_id 
+        AND properties.agent_id = auth.uid()
+    ));
+
+CREATE POLICY "Social posts follow property access" ON public.social_posts
+    FOR ALL USING (EXISTS (
+        SELECT 1 FROM public.properties 
+        WHERE properties.id = social_posts.property_id 
+        AND properties.agent_id = auth.uid()
+    ));
+
+CREATE POLICY "Social stats follow post access" ON public.social_stats
+    FOR ALL USING (EXISTS (
+        SELECT 1 FROM public.social_posts sp
+        JOIN public.properties p ON sp.property_id = p.id
+        WHERE sp.id = social_stats.social_post_id 
+        AND p.agent_id = auth.uid()
+    ));
+
+CREATE POLICY "Chat sessions follow user access" ON public.chat_sessions
+    FOR ALL USING (auth.uid() = user_id);
+
+CREATE POLICY "Leads follow property access" ON public.leads
+    FOR ALL USING (EXISTS (
+        SELECT 1 FROM public.properties 
+        WHERE properties.id = leads.property_id 
+        AND properties.agent_id = auth.uid()
+    ));
+
+CREATE POLICY "Workflow executions follow agent access" ON public.workflow_executions
+    FOR ALL USING (auth.uid() = agent_id);
+
+CREATE POLICY "Error logs follow user access" ON public.error_logs
+    FOR ALL USING (auth.uid() = user_id OR auth.uid() IN (
+        SELECT agent_id FROM public.properties WHERE id = error_logs.property_id
+    ));
+
+-- Grant necessary permissions
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated;
+
+-- Schema setup complete

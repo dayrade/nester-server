@@ -170,3 +170,17 @@ CREATE TRIGGER create_user_profile_trigger
 
 -- Success message
 SELECT '🎉 Nester database setup completed successfully!' as message;
+
+
+
+
+
+----------------------------------------------------------
+ALTER TABLE properties 
+ADD COLUMN IF NOT EXISTS content_generation_job_id TEXT,
+ADD COLUMN IF NOT EXISTS content_generation_status TEXT,
+ADD COLUMN IF NOT EXISTS content_generation_started_at TIMESTAMPTZ,
+ADD COLUMN IF NOT EXISTS content_generation_completed_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_properties_content_generation_status 
+ON properties(content_generation_status);
