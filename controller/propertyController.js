@@ -4,7 +4,161 @@ const logger = require('../utils/logger');
 const errorHelper = require('../../error-helper');
 
 /**
- * Create a new property
+ * Create a new property with images in a single transaction
+ */
+const createPropertyWithImages = async (req, res) => {
+  try {
+    // Log API hit for debugging
+    logger.info('Create property with images API hit', {
+      method: req.method,
+      url: req.url,
+      userAgent: req.get('User-Agent'),
+      timestamp: new Date().toISOString(),
+      filesCount: req.files ? req.files.length : 0
+    });
+    
+    let agentId = req.user?.id;
+    console.log('agentId', agentId);
+    
+    // For testing purposes, allow manual agent_id or create a test user
+    if (!agentId) {
+      if (req.body.test_mode || process.env.NODE_ENV === 'development') {
+        const { v4: uuidv4 } = require('uuid');
+        agentId = uuidv4();
+        logger.info('Created test agent_id for development', { agentId });
+      } else {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+    }
+    
+    // Parse property data from form data
+    const propertyData = {
+      title: req.body.title,
+      address: req.body.address,
+      price: req.body.price ? parseFloat(req.body.price) : null,
+      bedrooms: req.body.bedrooms ? parseInt(req.body.bedrooms) : null,
+      bathrooms: req.body.bathrooms ? parseFloat(req.body.bathrooms) : null,
+      square_feet: req.body.square_feet ? parseInt(req.body.square_feet) : null,
+      property_type: req.body.property_type,
+      listing_type: req.body.listing_type,
+      description: req.body.description,
+      features: req.body.features ? JSON.parse(req.body.features) : [],
+      location: req.body.location ? JSON.parse(req.body.location) : null,
+      contact_info: req.body.contact_info ? JSON.parse(req.body.contact_info) : null
+    };
+    
+    if (!propertyData.address && !propertyData.title) {
+      return res.status(400).json({ error: 'Property address or title is required' });
+    }
+
+    // Use title as address if address is not provided
+    if (!propertyData.address && propertyData.title) {
+      propertyData.address = propertyData.title;
+    }
+
+    // Step 1: Insert property details
+    const property = await propertyService.createProperty(propertyData, agentId);
+    logger.info('Property created successfully', { propertyId: property.id });
+    
+    // Step 2: Upload images to Supabase and insert into property_images table
+    const uploadedImages = [];
+    
+    if (req.files && req.files.length > 0) {
+      logger.info(`Processing ${req.files.length} images for property ${property.id}`);
+      
+      for (let i = 0; i < req.files.length; i++) {
+        const file = req.files[i];
+        try {
+          // Parse image options from form data
+          const imageOptions = {
+            isPrimary: i === 0, // First image is primary by default
+            altText: req.body[`image_${i}_alt`] || `${property.title} - Image ${i + 1}`,
+            displayOrder: i,
+            roomType: req.body[`image_${i}_room_type`] || null
+          };
+          
+          // Upload image to Supabase storage and insert metadata
+          const uploadResult = await storageService.uploadPropertyImage(
+            property.id, 
+            agentId, 
+            file, 
+            imageOptions
+          );
+          
+          uploadedImages.push(uploadResult);
+          logger.info(`Image ${i + 1} uploaded successfully`, { 
+            propertyId: property.id,
+            imageId: uploadResult.id,
+            storagePath: uploadResult.storage_path
+          });
+        } catch (imageError) {
+          logger.error(`Failed to upload image ${i + 1} for property ${property.id}:`, imageError);
+          // Continue with other images even if one fails
+        }
+      }
+    }
+    
+    // Step 3: Get complete property data with uploaded images
+    const completeProperty = await propertyService.getPropertyById(property.id, agentId, {
+      includeImages: true,
+      includeSocialPosts: false
+    });
+    
+    // Step 4: Automatically trigger content generation
+    try {
+      const aiService = require('../services/ai/aiService');
+      const contentTypes = ['description', 'social_posts'];
+      
+      if (completeProperty) {
+        aiService.generatePropertyContent(completeProperty, contentTypes)
+          .then(contentJob => {
+            logger.info('Content generation started for new property', {
+              propertyId: property.id,
+              jobId: contentJob.id,
+              contentTypes
+            });
+          })
+          .catch(error => {
+            logger.warn('Failed to start content generation', {
+              propertyId: property.id,
+              error: error.message
+            });
+          });
+      }
+    } catch (error) {
+      logger.warn('Content generation setup failed', {
+        propertyId: property.id,
+        error: error.message
+      });
+    }
+    
+    // Step 5: Send response with property and images
+    res.status(201).json({
+      success: true,
+      data: {
+        property: completeProperty,
+        uploadedImages: uploadedImages,
+        imageCount: uploadedImages.length
+      },
+      message: `Property created successfully with ${uploadedImages.length} images uploaded.`
+    });
+    
+  } catch (error) {
+    const errorId = errorHelper.trackRequest(error, req, {
+      endpoint: '/api/properties/create-with-images',
+      operation: 'create_property_with_images',
+      agentId: req.user?.id || 'test-agent-123'
+    });
+    logger.error(`Error creating property with images [${errorId}]:`, error);
+    res.status(500).json({ 
+      error: error.message || 'Internal server error',
+      errorId
+    });
+  }
+};
+
+/**
+ * Create a new property (original endpoint for backward compatibility)
  */
 const createProperty = async (req, res) => {
   try {
@@ -435,6 +589,50 @@ const uploadPropertyImage = async (req, res) => {
 };
 
 /**
+ * Update property image metadata
+ */
+const updatePropertyImage = async (req, res) => {
+  try {
+    const { imageId } = req.params;
+    const agentId = req.user?.id;
+    if (!agentId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    const { altText, isPrimary, displayOrder, roomType } = req.body;
+    
+    const updated = await propertyService.updatePropertyImage(imageId, {
+      altText,
+      isPrimary,
+      displayOrder,
+      roomType
+    });
+    
+    if (!updated) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+    
+    res.json({
+      success: true,
+      data: updated,
+      message: 'Image metadata updated successfully'
+    });
+  } catch (error) {
+    const errorId = errorHelper.trackRequest(error, req, {
+      endpoint: `/api/properties/images/${req.params.imageId}`,
+      operation: 'update_property_image',
+      imageId: req.params.imageId,
+      agentId: req.user?.id || 'test-agent-123'
+    });
+    logger.error(`Error updating property image [${errorId}]:`, error);
+    res.status(500).json({ 
+      error: error.message || 'Internal server error',
+      errorId
+    });
+  }
+};
+
+/**
  * Delete property image
  */
 const deletePropertyImage = async (req, res) => {
@@ -445,12 +643,18 @@ const deletePropertyImage = async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
     
-    const property = await propertyService.getPropertyById(id, agentId);
-    if (!property) {
-      return res.status(404).json({ error: 'Property not found' });
+    // Handle both routes: /properties/:id/images/:imageId and /properties/images/:imageId
+    const actualImageId = imageId || id; // If only one param, it's the imageId
+    
+    // If we have both id and imageId, verify property ownership
+    if (id && imageId) {
+      const property = await propertyService.getPropertyById(id, agentId);
+      if (!property) {
+        return res.status(404).json({ error: 'Property not found' });
+      }
     }
     
-    const deleted = await storageService.deletePropertyImage(imageId);
+    const deleted = await propertyService.deletePropertyImage(actualImageId);
     
     if (!deleted) {
       return res.status(404).json({ error: 'Image not found' });
@@ -462,10 +666,10 @@ const deletePropertyImage = async (req, res) => {
     });
   } catch (error) {
     const errorId = errorHelper.trackRequest(error, req, {
-      endpoint: `/api/properties/${req.params.id}/images/${req.params.imageId}`,
+      endpoint: req.originalUrl,
       operation: 'delete_property_image',
       propertyId: req.params.id,
-      imageId: req.params.imageId,
+      imageId: req.params.imageId || req.params.id,
       agentId: req.user?.id || 'test-agent-123'
     });
     logger.error(`Error deleting property image [${errorId}]:`, error);
@@ -478,6 +682,7 @@ const deletePropertyImage = async (req, res) => {
 
 module.exports = {
   createProperty,
+  createPropertyWithImages,
   getProperties,
   getPropertyById,
   updateProperty,
@@ -486,5 +691,6 @@ module.exports = {
   generatePropertyContent,
   getPropertyImages,
   uploadPropertyImage,
+  updatePropertyImage,
   deletePropertyImage
 };

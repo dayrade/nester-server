@@ -3,7 +3,8 @@ const path = require('path');
 const fs = require("fs");
 
 async function verifyAuth(req, res, next) {
-  const token = req.cookies.access_token || req.headers.authorization?.replace('Bearer ', '');
+  const token = (req.cookies && req.cookies.access_token) || 
+                (req.headers.authorization && req.headers.authorization.replace('Bearer ', ''));
   // Use originalUrl to get the full path, not just the relative path within the router
   const fullPath = req.originalUrl || req.path;
   const isApiRoute = fullPath.startsWith('/api/');

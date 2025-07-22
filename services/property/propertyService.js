@@ -246,7 +246,14 @@ class PropertyService {
                     status,
                     scheduled_for,
                     published_at,
-                    engagement_metrics
+                    social_stats(
+                        likes,
+                        comments,
+                        shares,
+                        views,
+                        saves,
+                        clicks
+                    )
                 )`;
             }
             if (includeChatSessions) {
@@ -510,7 +517,7 @@ class PropertyService {
    * Add property image
    */
   async addPropertyImage(propertyId, imageData) {
-    const { data, error } = await supabase
+    const { data, error } = await this.supabase
       .from('property_images')
       .insert([{ property_id: propertyId, ...imageData }])
       .select('*')
@@ -524,35 +531,85 @@ class PropertyService {
   }
   
   /**
+   * Update property image metadata
+   */
+  async updatePropertyImage(imageId, updateData) {
+    // Map camelCase to snake_case for database columns
+    const dbUpdateData = {};
+    
+    if (updateData.altText !== undefined) {
+      dbUpdateData.alt_text = updateData.altText;
+    }
+    if (updateData.isPrimary !== undefined) {
+      dbUpdateData.is_primary = updateData.isPrimary;
+    }
+    if (updateData.displayOrder !== undefined) {
+      dbUpdateData.display_order = updateData.displayOrder;
+    }
+    if (updateData.roomType !== undefined) {
+      dbUpdateData.room_type = updateData.roomType;
+    }
+    
+    const { data, error } = await this.supabase
+      .from('property_images')
+      .update(dbUpdateData)
+      .eq('id', imageId)
+      .select('*')
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return null; // Image not found
+      }
+      throw new Error(`Failed to update property image: ${error.message}`);
+    }
+    
+    return data;
+  }
+  
+  /**
    * Delete property image
    */
-  async deletePropertyImage(propertyId, imageId, agentId) {
-    // First verify the property belongs to the agent
-    const property = await this.getPropertyById(propertyId, agentId);
-    if (!property) {
-      throw new Error('Property not found or access denied');
+  async deletePropertyImage(imageIdOrPropertyId, imageId = null, agentId = null) {
+    // Handle both signatures: deletePropertyImage(imageId) and deletePropertyImage(propertyId, imageId, agentId)
+    const actualImageId = imageId || imageIdOrPropertyId;
+    const propertyId = imageId ? imageIdOrPropertyId : null;
+    
+    // If propertyId and agentId are provided, verify ownership
+    if (propertyId && agentId) {
+      const property = await this.getPropertyById(propertyId, agentId);
+      if (!property) {
+        throw new Error('Property not found or access denied');
+      }
     }
     
     // Get image details for storage cleanup
-    const { data: image } = await supabase
+    const { data: image } = await this.supabase
       .from('property_images')
-      .select('storage_path')
-      .eq('id', imageId)
-      .eq('property_id', propertyId)
+      .select('storage_path, property_id')
+      .eq('id', actualImageId)
       .single();
     
-    if (image && image.storage_path) {
+    if (!image) {
+      return null; // Image not found
+    }
+    
+    // If propertyId was specified, verify it matches
+    if (propertyId && image.property_id !== propertyId) {
+      throw new Error('Image does not belong to the specified property');
+    }
+    
+    if (image.storage_path) {
       // Delete from storage
-      await supabase.storage
+      await this.supabase.storage
         .from('property-images')
         .remove([image.storage_path]);
     }
     
-    const { data, error } = await supabase
+    const { data, error } = await this.supabase
       .from('property_images')
       .delete()
-      .eq('id', imageId)
-      .eq('property_id', propertyId)
+      .eq('id', actualImageId)
       .select('*')
       .single();
     
@@ -963,7 +1020,14 @@ class PropertyService {
         try {
             const { data, error } = await this.supabase
                 .from('social_posts')
-                .select('*')
+                .select(`
+                    *,
+                    social_stats (
+                        likes,
+                        comments,
+                        shares
+                    )
+                `)
                 .eq('property_id', propertyId);
 
             if (error) throw error;
@@ -971,8 +1035,8 @@ class PropertyService {
             const totalPosts = data.length;
             const publishedPosts = data.filter(p => p.status === 'published').length;
             const totalEngagement = data.reduce((sum, post) => {
-                const metrics = post.engagement_metrics || {};
-                return sum + (metrics.likes || 0) + (metrics.comments || 0) + (metrics.shares || 0);
+                const stats = post.social_stats || {};
+                return sum + (stats.likes || 0) + (stats.comments || 0) + (stats.shares || 0);
             }, 0);
 
             return {

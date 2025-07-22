@@ -166,7 +166,8 @@ class StorageService {
       // Wait for all uploads to complete
       await Promise.all(uploadPromises);
 
-      // Store image record in database
+      // Store image record in database using propertyService
+      const propertyService = require('../property/propertyService');
       const imageRecord = {
         property_id: propertyId,
         storage_path: imageVariants.original,
@@ -176,15 +177,7 @@ class StorageService {
         room_type: options.roomType || null
       };
 
-      const { data, error } = await supabase
-        .from('property_images')
-        .insert([imageRecord])
-        .select('*')
-        .single();
-
-      if (error) {
-        throw new Error(`Failed to save image record: ${error.message}`);
-      }
+      const data = await propertyService.addPropertyImage(propertyId, imageRecord);
 
       logger.info('Property image uploaded successfully', {
         propertyId,
