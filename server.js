@@ -48,7 +48,7 @@ const corsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = [
       process.env.FRONTEND_URL || 'http://localhost:3000',
-      process.env.BACKEND_URL || 'http://localhost:3002',
+      process.env.BACKEND_URL || 'http://localhost:3001',
       process.env.PRODUCTION_URL || 'https://nester.studio',
       process.env.NEXT_PUBLIC_SITE_URL,
       process.env.NEXT_PUBLIC_APP_URL

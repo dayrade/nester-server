@@ -33,7 +33,7 @@ const upload = multer({
 });
 // Simplified for testing - removed validation and upload middleware
 
-// All property routes require authentication
+// Apply authentication middleware to all routes
 router.use(verifyAuth);
 
 // Property CRUD operations
